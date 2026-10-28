@@ -5,7 +5,7 @@ import { haversineM } from "./geo";
 import { excludedIds, radiusForWeek, revisitId } from "./journey";
 import { LimitError } from "./limits";
 import { SYSTEM_PROMPT, TOOLS, userTurn } from "./prompts";
-import { QlooError, sharedTaste, type Candidate } from "./qloo";
+import { QlooError, hoursToday, sharedTaste, type Candidate } from "./qloo";
 import { CardSchema, type Area, type Card, type JourneyState } from "./schema";
 
 export const MODEL = "claude-haiku-5-5";
@@ -27,7 +27,11 @@ export type AgentResult = {
   usage: { inputTokens: number; outputTokens: number };
   /** The candidates this round chose from, so the route can save the shown ones. */
   candidates: Candidate[];
+  /** The Qloo query this round sent, for the request panel. */
+  query: AgentQuery;
 };
+
+export type AgentQuery = Parameters<AgentDeps["findCandidates"]>[0];
 
 const SubmitSchema = z.object({
   cards: z
@@ -42,7 +46,21 @@ function allowedTaste(c: Candidate, state: JourneyState): string[] {
 }
 
 function toCard(c: Candidate, state: JourneyState, picked: { tasteLink: string[]; unknowns: string[]; why: string }): Card {
-  return CardSchema.parse({ entityId: c.id, name: c.name, distanceM: c.distanceM, address: c.address, ...picked, revisit: state.liked.includes(c.id) });
+  return CardSchema.parse({
+    entityId: c.id,
+    name: c.name,
+    distanceM: c.distanceM,
+    address: c.address,
+    lat: c.lat,
+    lng: c.lng,
+    affinity: c.affinity,
+    photoUrl: c.photoUrl,
+    hoursToday: hoursToday(c.hours, new Date()),
+    priceLevel: c.priceLevel,
+    blurb: c.blurb,
+    ...picked,
+    revisit: state.liked.includes(c.id),
+  });
 }
 
 export function validateCards(input: unknown, candidates: Candidate[], state: JourneyState): { ok: true; cards: Card[] } | { ok: false; errors: string[] } {
@@ -82,7 +100,7 @@ export function fallbackCards(candidates: Candidate[], state: JourneyState): Car
     const tasteLink = allowedTaste(c, state).slice(0, 4);
     const detail = tasteLink.length ? `: ${tasteLink.slice(0, 2).join(" and ").toLowerCase()}` : "";
     const why = `Taste-affine with ${state.seed.name} on Qloo${detail}.`.slice(0, 240);
-    return toCard(c, state, { tasteLink, unknowns: ["hours"], why });
+    return toCard(c, state, { tasteLink, unknowns: c.hours ? ["seating"] : ["hours"], why });
   });
 }
 
@@ -92,7 +110,7 @@ function withRevisitCard(cards: Card[], candidates: Candidate[], state: JourneyS
   const c = id ? candidates.find((x) => x.id === id) : undefined;
   if (!c || cards.some((card) => card.entityId === c.id)) return cards;
   const why = `You loved it last week, and it is still taste-affine with ${state.seed.name} on Qloo.`.slice(0, 240);
-  return [toCard(c, state, { tasteLink: allowedTaste(c, state).slice(0, 4), unknowns: ["hours"], why }), ...cards].slice(0, 3);
+  return [toCard(c, state, { tasteLink: allowedTaste(c, state).slice(0, 4), unknowns: c.hours ? ["seating"] : ["hours"], why }), ...cards].slice(0, 3);
 }
 
 function byAffinity(found: Candidate[]): Candidate[] {
@@ -122,11 +140,11 @@ export async function runAgent(state: JourneyState, deps: AgentDeps, opts: { rad
   const empty = (): AgentResult => {
     const widenOffer = radiusM < WIDE_RADIUS_M;
     const notice = widenOffer ? `Coverage is thin here. Widen to ${WIDE_RADIUS_M} m?` : `Coverage is thin here, even at ${WIDE_RADIUS_M} m.`;
-    return { cards: [], source: "empty", notice, widenOffer, usage, candidates: [] };
+    return { cards: [], source: "empty", notice, widenOffer, usage, candidates: [], query };
   };
   const fallback = async (): Promise<AgentResult> => {
     const found = await lookup();
-    return found.length ? { cards: fallbackCards(found, state), source: "fallback", notice: null, widenOffer: false, usage, candidates: found } : empty();
+    return found.length ? { cards: fallbackCards(found, state), source: "fallback", notice: null, widenOffer: false, usage, candidates: found, query } : empty();
   };
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userTurn(state, radiusM) }];
@@ -145,11 +163,11 @@ export async function runAgent(state: JourneyState, deps: AgentDeps, opts: { rad
         if (call.name === "find_candidates") {
           const found = await lookup();
           if (!found.length) return empty();
-          const view = found.map((c) => ({ id: c.id, name: c.name, distanceM: c.distanceM, affinity: c.affinity, revisit: state.liked.includes(c.id), allowedTasteTags: allowedTaste(c, state) }));
+          const view = found.map((c) => ({ id: c.id, name: c.name, distanceM: c.distanceM, affinity: c.affinity, revisit: state.liked.includes(c.id), allowedTasteTags: allowedTaste(c, state), hoursToday: hoursToday(c.hours, new Date()) ?? "unknown" }));
           results.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(view) });
         } else if (call.name === "submit_cards" && candidates) {
           const checked = validateCards(call.input, candidates, state);
-          if (checked.ok) return { cards: withRevisitCard(checked.cards, candidates, state), source: "agent", notice: null, widenOffer: false, usage, candidates };
+          if (checked.ok) return { cards: withRevisitCard(checked.cards, candidates, state), source: "agent", notice: null, widenOffer: false, usage, candidates, query };
           if (++badSubmits > 1) return await fallback();
           results.push({ type: "tool_result", tool_use_id: call.id, is_error: true, content: checked.errors.join("\n") });
         } else {

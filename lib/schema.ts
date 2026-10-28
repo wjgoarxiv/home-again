@@ -26,6 +26,10 @@ export const SavedCafeSchema = z.object({
   address: z.string().max(300).optional(),
   affinity: z.number().nullable(),
   tags: z.array(z.string().min(1).max(80)).max(200),
+  photoUrl: z.string().max(500).regex(/^https:\/\//).optional(),
+  priceLevel: z.number().int().min(1).max(4).optional(),
+  blurb: z.string().max(200).optional(),
+  hours: z.record(z.string().max(12), z.string().max(40)).optional(),
 });
 
 export const JourneyStateSchema = z.object({
@@ -52,6 +56,13 @@ export const CardSchema = z.object({
   name: z.string().min(1),
   distanceM: z.number().nonnegative(),
   address: z.string().optional(),
+  lat: z.number(),
+  lng: z.number(),
+  affinity: z.number().nullable(),
+  photoUrl: z.string().max(500).optional(),
+  hoursToday: z.string().max(40).optional(),
+  priceLevel: z.number().int().min(1).max(4).optional(),
+  blurb: z.string().max(200).optional(),
   tasteLink: z.array(z.string().min(1)).max(4),
   unknowns: z.array(z.string().min(1)).max(3),
   why: z.string().min(1).max(240),

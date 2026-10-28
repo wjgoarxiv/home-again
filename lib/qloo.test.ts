@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import fixture from "@/test/fixtures/insights.synthetic.json";
-import { QlooError, buildInsightsParams, parseCandidates, qlooGet, sharedTaste } from "./qloo";
+import { QlooError, buildInsightsParams, hoursToday, parseCandidates, qlooGet, sharedTaste } from "./qloo";
 
 const area = { name: "East Village", lat: 40.726111, lng: -73.981389 };
 
@@ -34,8 +34,29 @@ describe("parseCandidates", () => {
     expect(candidates[0].distanceM).toBeLessThan(1000);
   });
 
+  it("keeps Qloo's photo, weekly hours, price level and a short blurb", () => {
+    expect(candidates[0]).toMatchObject({
+      photoUrl: "https://images.example.test/test-roasters.jpg",
+      priceLevel: 1,
+      hours: { monday: "07:30–15:00", sunday: "closed" },
+    });
+    expect(candidates[0].blurb!.length).toBeLessThanOrEqual(160);
+    expect(candidates[0].blurb!.endsWith("…")).toBe(true);
+    expect(candidates[1]).not.toHaveProperty("photoUrl");
+  });
+
   it("rejects a response without an entity list", () => {
     expect(() => parseCandidates({ success: false }, area, 1000)).toThrow(QlooError);
+  });
+});
+
+describe("hoursToday", () => {
+  const hours = { monday: "07:30–15:00", sunday: "closed" };
+  it("reads the weekday in New York time", () => {
+    expect(hoursToday(hours, new Date("2026-10-26T15:00:00Z"))).toBe("07:30–15:00"); // Monday 11:00 in New York
+    expect(hoursToday(hours, new Date("2026-10-26T02:00:00Z"))).toBe("closed"); // still Sunday evening in New York
+    expect(hoursToday(hours, new Date("2026-10-27T15:00:00Z"))).toBeUndefined(); // no Tuesday entry
+    expect(hoursToday(undefined, new Date())).toBeUndefined();
   });
 });
 

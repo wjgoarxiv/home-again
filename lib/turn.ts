@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { WIDE_RADIUS_M, runAgent, userMessage, type AgentDeps } from "./agent";
+import { WIDE_RADIUS_M, runAgent, userMessage, type AgentDeps, type AgentResult } from "./agent";
 import { applyFeedback } from "./journey";
 import { LimitError, SESSION_TTL_SEC, budgeted, capsFromEnv, getStore, requestKey, type Store } from "./limits";
 import { QLOO_PATHS, QlooError, buildInsightsParams, buildSearchParams, parseCandidates, parseSearch, qlooEnv, qlooGet } from "./qloo";
@@ -39,6 +39,26 @@ function failure(err: unknown): Reply {
   return { status: 500, body: { error: "internal", notice: userMessage(err) } };
 }
 
+export const INSIGHTS_TAKE = 20;
+
+/** What the request panel shows: the Qloo query this round sent, named, with why each café was left out. */
+function traceOf(state: JourneyState, result: AgentResult, ms: number) {
+  const nameOf = (id: string) => (id === state.seed.id ? state.seed.name : state.saved.find((c) => c.id === id)?.name);
+  const reason = (id: string) => (state.rejected.includes(id) ? "rejected" : state.crowded.includes(id) ? "crowded" : "seen");
+  const affinities = result.candidates.map((c) => c.affinity ?? 0);
+  return {
+    endpoint: "v2/insights",
+    radiusM: result.query.radiusM,
+    signal: result.query.signalIds.map((id) => ({ id, name: nameOf(id) ?? id })),
+    exclude: result.query.excludeIds.map((id) => ({ id, name: nameOf(id), reason: reason(id) })),
+    take: INSIGHTS_TAKE,
+    returned: result.candidates.length,
+    topAffinity: affinities.length ? Math.max(...affinities) : null,
+    source: result.source,
+    ms,
+  };
+}
+
 export async function handleTurn(raw: unknown, sessionId: string, env: TurnEnv): Promise<Reply> {
   const parsed = TurnBodySchema.safeParse(raw);
   if (!parsed.success) return BAD_REQUEST;
@@ -59,13 +79,15 @@ export async function handleTurn(raw: unknown, sessionId: string, env: TurnEnv):
       : env.agentDeps;
 
   try {
+    const started = Date.now();
     const result = await runAgent(state, deps, widen ? { radiusM: WIDE_RADIUS_M } : {});
     console.info("turn", result.source, `in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
     const shown = result.cards.map((c) => c.entityId);
     const snapshots = result.candidates.filter((c) => shown.includes(c.id)).map(({ distanceM: _d, ...cafe }) => cafe);
-    const keep = state.saved.filter((c) => state.liked.includes(c.id) && !shown.includes(c.id));
+    const keep = state.saved.filter((c) => !shown.includes(c.id));
     const next = { ...state, shown, saved: [...keep, ...snapshots].slice(-12) };
-    return { status: 200, body: { state: next, cards: result.cards, notice: result.notice, widenOffer: result.widenOffer, source: result.source } };
+    const trace = traceOf(state, result, Date.now() - started);
+    return { status: 200, body: { state: next, cards: result.cards, notice: result.notice, widenOffer: result.widenOffer, source: result.source, trace } };
   } catch (err) {
     return failure(err);
   }
@@ -105,7 +127,7 @@ export function liveEnv(sessionId: string): TurnEnv {
     agentDeps: {
       createMessage,
       findCandidates: ({ area, radiusM, signalIds, excludeIds }) => {
-        const params = buildInsightsParams({ area, radiusM, signalIds, excludeIds, take: 20 });
+        const params = buildInsightsParams({ area, radiusM, signalIds, excludeIds, take: INSIGHTS_TAKE });
         return cachedGet(QLOO_PATHS.insights, params, (json) => parseCandidates(json, area, radiusM));
       },
     },

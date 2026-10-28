@@ -40,6 +40,11 @@ export type Candidate = {
   affinity: number | null;
   address?: string;
   tags: string[];
+  photoUrl?: string;
+  priceLevel?: number;
+  blurb?: string;
+  /** Weekday → "07:30–15:00" or "closed"; today's line is picked when a card is built, not when cached. */
+  hours?: Record<string, string>;
 };
 
 export class QlooError extends Error {
@@ -98,10 +103,62 @@ type RawEntity = {
   entity_id?: string;
   name?: string;
   location?: { lat?: number; lon?: number; latitude?: number; longitude?: number };
-  properties?: { address?: string };
+  properties?: {
+    address?: string;
+    image?: { url?: string };
+    images?: { url?: string }[];
+    price_level?: number;
+    short_description?: string;
+    hours?: Record<string, { opens?: string; closes?: string; closed?: boolean }[]>;
+  };
   query?: { affinity?: number };
   tags?: { name?: string; type?: string }[];
 };
+
+const BLURB_MAX = 160;
+const clock = (t?: string) => t?.match(/(\d{2}:\d{2})/)?.[1];
+
+function weekHours(raw: NonNullable<RawEntity["properties"]>["hours"]): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  const out: Record<string, string> = {};
+  for (const [day, spans] of Object.entries(raw)) {
+    if (!Array.isArray(spans) || !spans.length) continue;
+    if (spans.every((s) => s.closed)) {
+      out[day] = "closed";
+      continue;
+    }
+    const open = spans.filter((s) => !s.closed && clock(s.opens) && clock(s.closes)).map((s) => `${clock(s.opens)}–${clock(s.closes)}`);
+    if (open.length) out[day] = open.join(", ");
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function shortBlurb(text?: string): string | undefined {
+  const t = text?.trim();
+  if (!t) return undefined;
+  if (t.length <= BLURB_MAX) return t;
+  return `${t.slice(0, BLURB_MAX - 1).replace(/\s+\S*$/u, "")}…`;
+}
+
+/** Today's opening line for a café in the New York neighbourhoods the app covers. */
+export function hoursToday(hours: Record<string, string> | undefined, now: Date): string | undefined {
+  if (!hours) return undefined;
+  const day = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "America/New_York" }).format(now).toLowerCase();
+  return hours[day];
+}
+
+function details(e: RawEntity): Pick<Candidate, "photoUrl" | "priceLevel" | "blurb" | "hours"> {
+  const p = e.properties ?? {};
+  const photoUrl = p.image?.url ?? p.images?.find((i) => i.url)?.url;
+  const out: Pick<Candidate, "photoUrl" | "priceLevel" | "blurb" | "hours"> = {};
+  if (photoUrl?.startsWith("https://")) out.photoUrl = photoUrl;
+  if (typeof p.price_level === "number" && p.price_level >= 1 && p.price_level <= 4) out.priceLevel = p.price_level;
+  const blurb = shortBlurb(p.short_description);
+  if (blurb) out.blurb = blurb;
+  const hours = weekHours(p.hours);
+  if (hours) out.hours = hours;
+  return out;
+}
 
 function entityList(json: unknown): RawEntity[] {
   const root = json as { results?: { entities?: unknown } | unknown[] };
@@ -124,7 +181,7 @@ export function parseCandidates(json: unknown, center: Area, radiusM: number): C
     if (!e.entity_id || !e.name || typeof lat !== "number" || typeof lng !== "number") continue;
     const distanceM = Math.round(haversineM(center, { lat, lng }));
     if (distanceM > radiusM) continue;
-    out.push({ id: e.entity_id, name: e.name, lat, lng, distanceM, affinity: e.query?.affinity ?? null, address: e.properties?.address, tags: entityTags(e) });
+    out.push({ id: e.entity_id, name: e.name, lat, lng, distanceM, affinity: e.query?.affinity ?? null, address: e.properties?.address, tags: entityTags(e), ...details(e) });
   }
   return out;
 }

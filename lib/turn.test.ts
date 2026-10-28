@@ -4,7 +4,7 @@ import { startJourney } from "./journey";
 import { LimitError, memoryStore } from "./limits";
 import { QlooError, type Candidate } from "./qloo";
 import { handleResolve, handleTurn, type TurnEnv } from "./turn";
-import { CardSchema } from "./schema";
+import { CardSchema, type JourneyState } from "./schema";
 
 const seed = { id: "SEED-1", name: "Seed Coffee", tags: ["Espresso"] };
 const area = { name: "East Village", lat: 40.726111, lng: -73.981389 };
@@ -43,14 +43,29 @@ describe("handleTurn", () => {
     expect(body.state.shown).toEqual(["TEST-0001", "TEST-0002"]);
   });
 
-  it("saves a snapshot of shown cafés and keeps only the loved ones afterwards", async () => {
+  it("saves a snapshot of every shown café so later weeks can name them", async () => {
     const week1 = (await handleTurn({ state: startJourney(seed, area) }, "s1", env())).body as { state: { saved: { id: string; name: string }[] } };
     expect(week1.state.saved.map((s) => s.id)).toEqual(["TEST-0001", "TEST-0002"]);
     expect(week1.state.saved[0]).not.toHaveProperty("distanceM");
     const next = await handleTurn({ state: week1.state, feedback: [{ id: "TEST-0001", verdict: "love" }, { id: "TEST-0002", verdict: "meh" }] }, "s1", env({ findCandidates: vi.fn(async () => []) }));
     const body = next.body as { state: { saved: { id: string }[] }; cards: { entityId: string; revisit: boolean }[] };
     expect(body.cards).toMatchObject([{ entityId: "TEST-0001", revisit: true }]);
-    expect(body.state.saved.map((s) => s.id)).toEqual(["TEST-0001"]);
+    expect(body.state.saved.map((s) => s.id)).toEqual(["TEST-0002", "TEST-0001"]);
+  });
+
+  it("returns a trace of the Qloo request with names and exclusion reasons", async () => {
+    const week1 = (await handleTurn({ state: startJourney(seed, area) }, "s1", env())).body as { state: JourneyState };
+    const reply = await handleTurn({ state: week1.state, feedback: [{ id: "TEST-0001", verdict: "love" }, { id: "TEST-0002", verdict: "crowded" }] }, "s1", env());
+    const trace = (reply.body as { trace: Record<string, unknown> }).trace;
+    expect(trace).toMatchObject({
+      endpoint: "v2/insights",
+      radiusM: 700,
+      signal: [{ id: "SEED-1", name: "Seed Coffee" }, { id: "TEST-0001", name: "Test Roasters" }],
+      exclude: [{ id: "TEST-0002", name: "Sample Coffee Bar", reason: "crowded" }],
+      source: "fallback",
+    });
+    expect(typeof trace.returned).toBe("number");
+    expect(typeof trace.ms).toBe("number");
   });
 
   it("accepts a seed with as many taste tags as a real Qloo place carries", async () => {
