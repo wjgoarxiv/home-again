@@ -48,9 +48,9 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
   const area = AREAS[areaIndex];
 
   return (
-    <section className="ui-panel" aria-label="Pick your old regular café" style={{ minWidth: 0, maxWidth: "100%" }}>
+    <section id="seed-form" tabIndex={-1} className="ui-panel" aria-label="Pick your old regular café" style={{ minWidth: 0, maxWidth: "100%", outline: "none" }}>
       <div className="ui-panel__head">
-        <h2 className="ui-panel__title">Start</h2>
+        <h2 className="ui-panel__title">Try your own café</h2>
         <span className="ui-label">Zero typing, one click</span>
       </div>
 
@@ -75,7 +75,7 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
                 type="button"
                 disabled={locked}
                 onClick={() => lookUp(s.name, s.city, AREAS[areaIndex], true, s.hint, s.key)}
-                className="ui-btn ui-btn--primary"
+                className="ui-btn"
                 aria-label={`Start from ${s.name}`}
                 style={{ width: "100%" }}
               >
@@ -123,7 +123,7 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
           </span>
         </label>
         <div className="ui-form-actions" style={{ minWidth: 0 }}>
-          <button type="submit" disabled={locked} className="ui-btn ui-btn--primary">
+          <button type="submit" disabled={locked} className="ui-btn">
             {looking && activeSeed === null ? "Looking it up…" : "Find my café on Qloo"}
           </button>
           <button

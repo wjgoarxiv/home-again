@@ -18,6 +18,7 @@ export function CafeCard({
   disabled,
   selected,
   onSelect,
+  tourVerdict,
 }: {
   card: Card;
   seedName: string;
@@ -26,6 +27,8 @@ export function CafeCard({
   disabled?: boolean;
   selected?: boolean;
   onSelect?: () => void;
+  /** The verdict the guided demo is pressing on this card right now. */
+  tourVerdict?: Verdict;
 }) {
   return (
     <article
@@ -71,6 +74,7 @@ export function CafeCard({
         <div className="grid grid-cols-3 gap-2">
           {VERDICTS.map((v) => {
             const on = verdict === v.value;
+            const pressing = tourVerdict === v.value;
             return (
               <button
                 key={v.value}
@@ -81,8 +85,8 @@ export function CafeCard({
                   e.stopPropagation();
                   onVerdict(v.value);
                 }}
-                className={`ui-btn ${on ? (v.value === "love" ? "ui-btn--primary" : "ui-btn--ink") : ""}`}
-                style={{ paddingInline: "var(--sp-8)" }}
+                className={`ui-btn ${on ? (v.value === "love" ? "ui-btn--primary" : "ui-btn--ink") : ""}${pressing ? " tour-press" : ""} text-[14px] sm:text-base`}
+                style={{ paddingInline: "var(--sp-4)" }}
               >
                 {v.label}
               </button>
