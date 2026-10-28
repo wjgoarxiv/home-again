@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { AREAS, EXAMPLE } from "@/lib/areas";
+import { useState, type CSSProperties } from "react";
+import { AREAS, EXAMPLE, SEEDS } from "@/lib/areas";
 import type { Area, Seed } from "@/lib/schema";
+import { pickMatch } from "@/lib/seeds";
 
 type Match = { id: string; name: string; address?: string; tags: string[] };
 
@@ -13,9 +14,11 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
   const [matches, setMatches] = useState<Match[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [looking, setLooking] = useState(false);
+  const [activeSeed, setActiveSeed] = useState<string | null>(null);
 
-  async function lookUp(cafe: string, town: string, area: Area, autoPick: boolean) {
+  async function lookUp(cafe: string, town: string, area: Area, autoPick: boolean, hint = "", seedKey: string | null = null) {
     setLooking(true);
+    setActiveSeed(seedKey);
     setNotice(null);
     setMatches(null);
     try {
@@ -23,12 +26,17 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
       const body = (await res.json()) as { matches?: Match[]; notice?: string | null };
       if (!res.ok || !body.matches) return setNotice(body.notice ?? "Something went wrong. Try again.");
       if (!body.matches.length) return setNotice(body.notice ?? "No match on Qloo.");
-      if (autoPick) return pick(body.matches[0], area, town);
+      if (autoPick) {
+        const hit = pickMatch(body.matches, hint);
+        if (!hit) return setNotice(body.notice ?? "No match on Qloo.");
+        return pick(hit, area, town);
+      }
       setMatches(body.matches);
     } catch {
       setNotice("Could not reach the server. Check your connection and try again.");
     } finally {
       setLooking(false);
+      setActiveSeed(null);
     }
   }
 
@@ -37,45 +45,93 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
   }
 
   const locked = busy || looking;
+  const area = AREAS[areaIndex];
 
   return (
-    <section className="rounded-3xl border border-line bg-card/90 p-5 shadow-soft sm:p-7">
+    <section className="ui-panel" aria-label="Pick your old regular café" style={{ minWidth: 0, maxWidth: "100%" }}>
+      <div className="ui-panel__head">
+        <h2 className="ui-panel__title">Start</h2>
+        <span className="ui-label">Zero typing, one click</span>
+      </div>
+
+      <p className="ui-label" style={{ marginBottom: "var(--sp-12)" }}>
+        One-click start
+      </p>
+      <div className="ui-grid" style={{ "--cols": 3 } as CSSProperties}>
+        {SEEDS.map((s) => {
+          const pressed = looking && activeSeed === s.key;
+          return (
+            <article key={s.key} className="ui-panel" style={{ minWidth: 0, display: "grid", gap: "var(--sp-12)", alignContent: "start" }}>
+              <div className="ui-panel__head">
+                <span className="ui-label">{s.city}</span>
+              </div>
+              <h3 className="ui-h3" style={{ overflowWrap: "anywhere" }}>
+                {s.name}
+              </h3>
+              <p className="ui-small" style={{ overflowWrap: "anywhere" }}>
+                {s.blurb}
+              </p>
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => lookUp(s.name, s.city, AREAS[areaIndex], true, s.hint, s.key)}
+                className="ui-btn ui-btn--primary"
+                aria-label={`Start from ${s.name}`}
+                style={{ width: "100%" }}
+              >
+                {pressed ? "Resolving…" : "Start here"}
+              </button>
+            </article>
+          );
+        })}
+      </div>
+
+      <hr className="ui-rule" style={{ marginBlock: "var(--sp-24)" }} />
+
+      <p className="ui-label" style={{ marginBottom: "var(--sp-12)" }}>
+        Or type your own
+      </p>
       <form
         className="grid gap-4"
+        style={{ minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}
         onSubmit={(e) => {
           e.preventDefault();
           if (name.trim()) lookUp(name.trim(), city.trim(), AREAS[areaIndex], false);
         }}
       >
-        <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
-          <label className="grid gap-1 text-sm font-medium">
-            Your old regular café
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required placeholder="e.g. Fritz Coffee Company" className="min-h-11 rounded-xl border border-line bg-paper px-3 text-base font-normal focus-visible:outline-2 focus-visible:outline-teal" />
+        <div className="grid gap-4" style={{ minWidth: 0, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))" }}>
+          <label className="ui-field" style={{ minWidth: 0 }}>
+            <span className="ui-label">Your old regular café</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required placeholder="e.g. Fritz Coffee Company" className="ui-input" />
           </label>
-          <label className="grid gap-1 text-sm font-medium">
-            City
-            <input value={city} onChange={(e) => setCity(e.target.value)} maxLength={60} placeholder="Seoul" className="min-h-11 rounded-xl border border-line bg-paper px-3 text-base font-normal focus-visible:outline-2 focus-visible:outline-teal" />
+          <label className="ui-field" style={{ minWidth: 0 }}>
+            <span className="ui-label">City</span>
+            <input value={city} onChange={(e) => setCity(e.target.value)} maxLength={60} placeholder="Seoul" className="ui-input" />
           </label>
         </div>
-        <label className="grid gap-1 text-sm font-medium">
-          Your new neighbourhood
-          <select value={areaIndex} onChange={(e) => setAreaIndex(Number(e.target.value))} className="min-h-11 rounded-xl border border-line bg-paper px-3 text-base font-normal focus-visible:outline-2 focus-visible:outline-teal">
+        <label className="ui-field" style={{ minWidth: 0 }}>
+          <span className="ui-label">Your new neighbourhood</span>
+          <select value={areaIndex} onChange={(e) => setAreaIndex(Number(e.target.value))} className="ui-select">
             {AREAS.map((a, i) => (
               <option key={a.name} value={i}>
                 {a.name}
               </option>
             ))}
           </select>
+          <span className="ui-coord">
+            {area.lat}, {area.lng}
+          </span>
         </label>
-        <div className="flex flex-wrap gap-3">
-          <button type="submit" disabled={locked} className="min-h-11 rounded-xl bg-teal px-5 font-semibold text-paper hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:opacity-50">
-            {looking ? "Looking it up…" : "Find my café on Qloo"}
+        <div className="ui-form-actions" style={{ minWidth: 0 }}>
+          <button type="submit" disabled={locked} className="ui-btn ui-btn--primary">
+            {looking && activeSeed === null ? "Looking it up…" : "Find my café on Qloo"}
           </button>
           <button
             type="button"
             disabled={locked}
-            onClick={() => lookUp(EXAMPLE.name, EXAMPLE.city, EXAMPLE.area, true)}
-            className="min-h-11 rounded-xl border border-coral px-5 font-semibold text-coral hover:bg-coral-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral disabled:opacity-50"
+            onClick={() => lookUp(EXAMPLE.name, EXAMPLE.city, EXAMPLE.area, true, SEEDS[0].hint)}
+            className="ui-btn"
+            style={{ whiteSpace: "normal", textAlign: "left", lineHeight: 1.4 }}
           >
             Try the example: Seoul → East Village
           </button>
@@ -83,20 +139,30 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
       </form>
 
       {notice && (
-        <p role="status" className="mt-4 rounded-xl bg-coral-soft px-4 py-3 text-sm">
-          {notice}
-        </p>
+        <div role="status" className="ui-callout ui-callout--negative" style={{ marginTop: "var(--sp-16)", overflowWrap: "anywhere" }}>
+          <p>{notice}</p>
+        </div>
       )}
 
       {matches && (
-        <div className="mt-5">
-          <p className="text-sm font-medium">Which one is it?</p>
-          <ul className="mt-2 grid gap-2">
+        <div style={{ marginTop: "var(--sp-20)", minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }} className="grid gap-4">
+          <p className="ui-label" style={{ marginBottom: "var(--sp-8)" }}>
+            Which one is it?
+          </p>
+          <ul className="grid gap-2" style={{ minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             {matches.map((m) => (
-              <li key={m.id}>
-                <button type="button" disabled={locked} onClick={() => pick(m, AREAS[areaIndex])} className="w-full rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-teal focus-visible:outline-2 focus-visible:outline-teal disabled:opacity-50">
-                  <span className="block font-semibold break-words">{m.name}</span>
-                  {m.address && <span className="block text-sm break-words text-muted">{m.address}</span>}
+              <li key={m.id} style={{ minWidth: 0 }}>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => pick(m, AREAS[areaIndex])}
+                  className="ui-btn"
+                  style={{ width: "100%", whiteSpace: "normal", textAlign: "left", justifyContent: "flex-start" }}
+                >
+                  <span className="block" style={{ overflowWrap: "anywhere" }}>
+                    {m.name}
+                    {m.address && <span className="block ui-small"> — {m.address}</span>}
+                  </span>
                 </button>
               </li>
             ))}
