@@ -10,15 +10,20 @@ import {
   ZOOM_MIN,
   buildScene,
   cafeStatus,
+  cameraMoved,
   clampZoom,
   compactLabel,
   fitAllScene,
   fitScene,
   followZoom,
+  isTap,
   isoFit,
   placeClear,
+  wheelZoomFactor,
+  zoomStepFactor,
   project,
   tasteRole,
+  turnedBack,
   towerHeight,
   type Scene,
   type Tower,
@@ -476,5 +481,67 @@ describe("placeClear", () => {
 
   it("gives up (null) when a panel fills the whole stage", () => {
     expect(placeClear(500, 300, 13, 13, [{ left: -10, top: -10, right: 1010, bottom: 610 }], bounds)).toBeNull();
+  });
+});
+
+describe("camera dock maths", () => {
+  it("steps zoom with the same curve as the wheel, and + then - returns to the start", () => {
+    expect(zoomStepFactor(1)).toBeCloseTo(wheelZoomFactor(-300), 10);
+    expect(zoomStepFactor(1)).toBeGreaterThan(1.3);
+    expect(zoomStepFactor(1) * zoomStepFactor(-1)).toBeCloseTo(1, 10);
+    expect(wheelZoomFactor(0)).toBe(1);
+  });
+
+  it("never steps past the zoom limits", () => {
+    let z = 1;
+    for (let i = 0; i < 30; i++) z = clampZoom(z * zoomStepFactor(1));
+    expect(z).toBe(ZOOM_MAX);
+    for (let i = 0; i < 30; i++) z = clampZoom(z * zoomStepFactor(-1));
+    expect(z).toBe(ZOOM_MIN);
+  });
+
+  it("enables Reset only once the view has moved", () => {
+    expect(cameraMoved(1, 0, 0)).toBe(false);
+    expect(cameraMoved(1.04, 0.04, 0.5)).toBe(false);
+    expect(cameraMoved(1.2, 0, 0)).toBe(true);
+    expect(cameraMoved(1, 0, 3)).toBe(true);
+    expect(cameraMoved(1, 0.5, 0)).toBe(true);
+  });
+
+  it("tells a tap from a drag (6 px, 250 ms)", () => {
+    const a = { x: 100, y: 100, t: 0 };
+    expect(isTap(a, { x: 103, y: 102, t: 120 })).toBe(true);
+    expect(isTap(a, { x: 140, y: 100, t: 120 })).toBe(false);
+    expect(isTap(a, { x: 100, y: 100, t: 400 })).toBe(false);
+  });
+});
+
+describe("quarter-turn fit", () => {
+  it("undoes the camera's turn: four turns are the identity and one turn maps (10, -10) onto the view axis", () => {
+    expect(turnedBack(3, 7, 0)).toEqual({ x: 3, z: 7 });
+    expect(turnedBack(3, 7, 4)).toEqual({ x: 3, z: 7 });
+    expect(turnedBack(3, 7, 2)).toEqual({ x: -3, z: -7 });
+    expect(turnedBack(10, -10, 1)).toEqual({ x: 10, z: 10 });
+    expect(turnedBack(10, -10, -1)).toEqual({ x: -10, z: -10 });
+  });
+
+  it("refits every quarter so the cafes stay in frame", () => {
+    // (10, -10) fills the width at 0 turns (screen x = 20 / sqrt 2) and sits on the view axis after one turn.
+    const scene = sceneOf([tower(10, -10, { height: 2 })]);
+    const wide = isoFit(scene, 1.5, 0);
+    const turned = isoFit(scene, 1.5, 1);
+    expect(wide).toBeCloseTo((20 / Math.SQRT2 + TOWER_HALF_UNITS) * 1.1, 6);
+    expect(turned).toBeLessThan(wide);
+    expect(isoFit(scene, 1.5, 4)).toBeCloseTo(wide, 10);
+    // after any turn the framed extent still holds the tower: screen x of the turned tower fits inside the half-width
+    for (const q of [0, 1, 2, 3]) {
+      const t = turnedBack(10, -10, q);
+      expect(Math.abs(t.x - t.z) / Math.SQRT2 + TOWER_HALF_UNITS).toBeLessThanOrEqual(isoFit(scene, 1.5, q));
+    }
+  });
+
+  it("lights Reset after a turn", () => {
+    expect(cameraMoved(1, 0, 0, 1)).toBe(true);
+    expect(cameraMoved(1, 0, 0, 4)).toBe(false);
   });
 });

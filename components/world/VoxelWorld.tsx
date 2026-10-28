@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { clampZoom, compactLabel, fitAllScene, fitScene, followZoom, isoFit, placeClear, type Box } from "../../lib/world";
+import { cameraMoved, clampZoom, compactLabel, fitAllScene, fitScene, followZoom, isTap, isoFit, placeClear, wheelZoomFactor, zoomStepFactor, type Box } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
 import { buildGraph, polylinesFromSnapshot, type P, type StreetGraph, type TravelMode } from "../../lib/route";
 import { buildTown, planTown, seedFromString, streetPolylines, type TownCafe, type TownPalette } from "./town";
@@ -68,6 +68,8 @@ const STEEP_Y = 5;
 const ARRIVE_HOLD_MS = 1000;
 const EASE_BACK_STEPS = 4;
 const EASE_BACK_MS = 100;
+const ROTATE_STEPS = 6;
+const ROTATE_MS = 40;
 /** Exponential follow rates (per second) for the camera target and zoom while travelling. */
 const FOLLOW_RATE = 5;
 const FOLLOW_ZOOM_RATE = 2.5;
@@ -81,6 +83,8 @@ type ThreeState = {
   content: THREE.Group | null;
   tops: Map<string, number>;
   bases: Map<string, number>;
+  /** Café id of each instance in the solid tower mesh, so a ray hit maps back to its café. */
+  towerOwners: string[];
   target: THREE.Vector3;
   reduced: boolean;
   stepTimers: number[];
@@ -130,12 +134,18 @@ type ThreeState = {
   cancelTrip: () => void;
   /** Camera dock: zoom by a factor, glide back to the overview, or take the character back into the follow camera. */
   zoomBy: (factor: number) => void;
+  /** Quarter-turn the camera round the home: +1 counter-clockwise, -1 clockwise (seen from above). */
+  rotate: (dir: 1 | -1) => void;
+  /** Camera turn in quarter-turns (whole number) and the angle drawn right now (radians, moves between quarters). */
+  quarter: number;
+  angle: number;
   goHome: () => void;
   refollow: () => void;
 };
 
 /** The camera dock's buttons light up only when there is something to undo. */
 type CamUi = { moved: boolean; trip: boolean; following: boolean };
+const UP = new THREE.Vector3(0, 1, 0);
 const KEY_PAN_FRACTION = 0.12;
 const DOCK_BTN = { minWidth: 44, minHeight: 44, padding: 0, justifyContent: "center", fontSize: 20, lineHeight: 1 } as const;
 
@@ -370,7 +380,7 @@ export default function VoxelWorld({
     container.appendChild(renderer.domElement);
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute("role", "application");
-    renderer.domElement.setAttribute("aria-label", "Map. Arrow keys pan, plus and minus zoom, 0 returns to the overview.");
+    renderer.domElement.setAttribute("aria-label", "Map. Arrow keys pan, plus and minus zoom, Q and E turn, 0 returns to the overview.");
     Object.assign(renderer.domElement.style, {
       position: "absolute",
       inset: "0",
@@ -401,6 +411,7 @@ export default function VoxelWorld({
       content: null,
       tops: new Map(),
       bases: new Map(),
+      towerOwners: [],
       target,
       reduced,
       stepTimers: [],
@@ -443,6 +454,9 @@ export default function VoxelWorld({
       startTrip: () => {},
       cancelTrip: () => {},
       zoomBy: () => {},
+      rotate: () => {},
+      quarter: 0,
+      angle: 0,
       goHome: () => {},
       refollow: () => {},
     };
@@ -454,25 +468,28 @@ export default function VoxelWorld({
     st.readInset = readInset;
     readInset();
 
+    const aspectNow = () => Math.max((container.clientWidth || 1) / (container.clientHeight || 1), 0.2);
+    const setHalf = (half: number) => {
+      st.fitHalf = half;
+      const aspect = aspectNow();
+      camera.left = -half;
+      camera.right = half;
+      camera.top = half / aspect;
+      camera.bottom = -half / aspect;
+      camera.updateProjectionMatrix();
+    };
     const fit = () => {
       const w = container.clientWidth || 1;
       const h = container.clientHeight || 1;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, w < 640 ? 1.5 : 2));
       renderer.setSize(w, h, false);
-      const aspect = Math.max(w / h, 0.2);
-      st.fitHalf = isoFit(sceneRef.current, aspect);
-      const halfH = st.fitHalf / aspect;
-      camera.left = -st.fitHalf;
-      camera.right = st.fitHalf;
-      camera.top = halfH;
-      camera.bottom = -halfH;
-      camera.updateProjectionMatrix();
+      setHalf(isoFit(sceneRef.current, aspectNow(), st.quarter));
     };
     st.applyFit = fit;
     fit();
 
     const render = () => {
-      const iso = new THREE.Vector3(1, 1 + st.tilt * (STEEP_Y - 1), 1).normalize().multiplyScalar(240);
+      const iso = new THREE.Vector3(1, 1 + st.tilt * (STEEP_Y - 1), 1).normalize().multiplyScalar(240).applyAxisAngle(UP, st.angle);
       camera.position.copy(st.target).add(iso);
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
@@ -484,7 +501,7 @@ export default function VoxelWorld({
       container.dataset.cam = `${camera.zoom.toFixed(2)} ${st.target.x.toFixed(1)} ${st.target.z.toFixed(1)}`;
       container.dataset.pos = `${st.pos.x.toFixed(1)} ${st.pos.z.toFixed(1)}`;
       const home = overview();
-      const moved = Math.abs(camera.zoom - 1) > 0.05 || st.tilt > 0.05 || Math.hypot(st.target.x - home.x, st.target.z - home.z) > 0.6;
+      const moved = cameraMoved(camera.zoom, st.tilt, Math.hypot(st.target.x - home.x, st.target.z - home.z), st.quarter);
       const trip = st.trip !== null;
       setCamUi((u) => (u.moved === moved && u.trip === trip && u.following === st.follow ? u : { moved, trip, following: st.follow }));
       updateLabels();
@@ -636,24 +653,60 @@ export default function VoxelWorld({
       st.camTimers = [];
       st.follow = false;
       const dest = overview();
+      const angleTo = Math.PI * 2 * Math.round(st.angle / (Math.PI * 2));
+      st.quarter = 0;
+      const halfTo = isoFit(sceneRef.current, aspectNow(), 0);
       if (st.reduced) {
         st.target.copy(dest);
         camera.zoom = 1;
         st.tilt = 0;
+        st.angle = angleTo;
+        setHalf(halfTo);
         renderNow();
         return;
       }
       const from = st.target.clone();
       const zoom0 = camera.zoom;
       const tilt0 = st.tilt;
+      const angle0 = st.angle;
+      const half0 = st.fitHalf;
       let k = 0;
       const tick = () => {
         k++;
-        st.target.lerpVectors(from, dest, k / EASE_BACK_STEPS);
-        camera.zoom = zoom0 + ((1 - zoom0) * k) / EASE_BACK_STEPS;
-        st.tilt = tilt0 * (1 - k / EASE_BACK_STEPS);
+        const f = k / EASE_BACK_STEPS;
+        st.target.lerpVectors(from, dest, f);
+        camera.zoom = zoom0 + (1 - zoom0) * f;
+        st.tilt = tilt0 * (1 - f);
+        st.angle = angle0 + (angleTo - angle0) * f;
+        setHalf(half0 + (halfTo - half0) * f);
         renderNow();
         if (k < EASE_BACK_STEPS) st.camTimers.push(window.setTimeout(tick, EASE_BACK_MS));
+      };
+      tick();
+    };
+    /** Turn the camera a quarter round the home, refitting as it goes so the cafes stay in frame at every turn. */
+    st.rotate = (dir) => {
+      takeCamera();
+      const index = Math.round(st.angle / (Math.PI / 2)) + dir;
+      const angleTo = index * (Math.PI / 2);
+      st.quarter = ((index % 4) + 4) % 4;
+      const halfTo = isoFit(sceneRef.current, aspectNow(), st.quarter);
+      if (st.reduced) {
+        st.angle = angleTo;
+        setHalf(halfTo);
+        renderNow();
+        return;
+      }
+      const angle0 = st.angle;
+      const half0 = st.fitHalf;
+      let k = 0;
+      const tick = () => {
+        k++;
+        const f = k / ROTATE_STEPS;
+        st.angle = angle0 + (angleTo - angle0) * f;
+        setHalf(half0 + (halfTo - half0) * f);
+        renderNow();
+        if (k < ROTATE_STEPS) st.camTimers.push(window.setTimeout(tick, ROTATE_MS));
       };
       tick();
     };
@@ -810,13 +863,29 @@ export default function VoxelWorld({
         st.target.x = Math.min(st.panLimit, Math.max(-st.panLimit, st.target.x));
         st.target.z = Math.min(st.panLimit, Math.max(-st.panLimit, st.target.z));
         renderNow();
-      } else if (e.key === "+" || e.key === "=") st.zoomBy(1.4);
-      else if (e.key === "-" || e.key === "_") st.zoomBy(1 / 1.4);
+      } else if (e.key === "+" || e.key === "=") st.zoomBy(zoomStepFactor(1));
+      else if (e.key === "-" || e.key === "_") st.zoomBy(zoomStepFactor(-1));
+      else if (e.key === "q" || e.key === "Q") st.rotate(-1);
+      else if (e.key === "e" || e.key === "E") st.rotate(1);
       else if (e.key === "0" || e.key === "Home") st.goHome();
       else return;
       e.preventDefault();
     };
+    /** Which café's solid tower is under this screen point (outline or hull meshes are not in the test: only layer "towers"). */
+    const towerAt = (clientX: number, clientY: number): string | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (!rect.width || !rect.height || !st.content) return null;
+      const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+      const solid = st.content.children.filter((c) => c.userData.layer === "towers");
+      if (solid.length === 0) return null;
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, camera);
+      const hit = ray.intersectObjects(solid, false)[0];
+      return hit?.instanceId !== undefined ? (st.towerOwners[hit.instanceId] ?? null) : null;
+    };
+    let down: { id: number; x: number; y: number; t: number } | null = null;
     const onPointerDown = (e: PointerEvent) => {
+      down = st.pointers.size === 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() } : null;
       takeCamera();
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (st.pointers.size === 2) {
@@ -827,7 +896,10 @@ export default function VoxelWorld({
     };
     const onPointerMove = (e: PointerEvent) => {
       const prev = st.pointers.get(e.pointerId);
-      if (!prev) return;
+      if (!prev) {
+        if (e.pointerType === "mouse") canvas.style.cursor = towerAt(e.clientX, e.clientY) ? "pointer" : "grab";
+        return;
+      }
       const dx = e.clientX - prev.x;
       const dy = e.clientY - prev.y;
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -856,13 +928,19 @@ export default function VoxelWorld({
       renderNow();
     };
     const onPointerUp = (e: PointerEvent) => {
+      const tap = down;
+      down = null;
+      if (e.type === "pointerup" && tap && tap.id === e.pointerId && isTap(tap, { x: e.clientX, y: e.clientY, t: performance.now() })) {
+        const id = towerAt(e.clientX, e.clientY);
+        if (id) onSelectRef.current(id);
+      }
       st.pointers.delete(e.pointerId);
       st.pinchDist = null;
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       takeCamera();
-      camera.zoom = clampZoom(camera.zoom * Math.exp(-e.deltaY * 0.001));
+      camera.zoom = clampZoom(camera.zoom * wheelZoomFactor(e.deltaY));
       renderNow();
     };
     const canvas = renderer.domElement;
@@ -1074,6 +1152,7 @@ export default function VoxelWorld({
       (hull.material as THREE.Material).dispose();
       hull.material = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide });
       let i = 0;
+      const owners: string[] = [];
       for (const tower of scene.towers) {
         const spec = targets.get(tower.id);
         if (!spec) continue;
@@ -1083,16 +1162,19 @@ export default function VoxelWorld({
         for (let v = 0; v < n; v++) {
           place(mesh, i, tower.x, base + v * VOX_H + VOX_H / 2, tower.z, VOX, VOX_H, VOX, spec.colors[Math.min(v, spec.colors.length - 1)] ?? palette.ink2);
           place(hull, i, tower.x, base + v * VOX_H + VOX_H / 2, tower.z, VOX + HULL_W, VOX_H + HULL_W, VOX + HULL_W, world.outline);
+          owners[i] = tower.id;
           i++;
         }
         if (spec.marker && n > 0) {
           place(mesh, i, tower.x, base + n * VOX_H + VOX_H / 2, tower.z, VOX * 0.55, VOX_H, VOX * 0.55, palette.accent2);
           place(hull, i, tower.x, base + n * VOX_H + VOX_H / 2, tower.z, VOX * 0.55 + HULL_W, VOX_H + HULL_W, VOX * 0.55 + HULL_W, world.outline);
+          owners[i] = tower.id;
           i++;
         }
         st.tops.set(tower.id, base + Math.max(n, 1) * VOX_H + (spec.marker && n > 0 ? VOX_H : 0));
       }
       mesh.count = i;
+      st.towerOwners = owners;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       hull.count = i;
@@ -1251,19 +1333,23 @@ export default function VoxelWorld({
       <div
         role="group"
         aria-label="Camera"
-        className="absolute z-10 flex flex-col"
-        style={{ right: 8, bottom: "calc(var(--stage-inset-bottom, 0px) + 44px)", gap: 6 }}
+        className="absolute z-10 flex-col"
+        data-camera-dock
+        style={{ display: "var(--camera-dock-display, flex)", right: "calc(var(--stage-inset-right, 0px) + 8px)", bottom: "calc(var(--stage-inset-bottom, 0px) + 44px)", gap: 6 }}
       >
         {camUi.trip && !camUi.following && (
           <button type="button" className="ui-btn ui-btn--primary" style={{ minHeight: 44 }} onClick={() => threeRef.current?.refollow()}>
             Follow
           </button>
         )}
-        <button type="button" className="ui-btn" aria-label="Zoom in" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(1.6)}>
+        <button type="button" className="ui-btn" aria-label="Zoom in" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(zoomStepFactor(1))}>
           +
         </button>
-        <button type="button" className="ui-btn" aria-label="Zoom out" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(1 / 1.6)}>
+        <button type="button" className="ui-btn" aria-label="Zoom out" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(zoomStepFactor(-1))}>
           &minus;
+        </button>
+        <button type="button" className="ui-btn" aria-label="Turn the view a quarter" title="Turn the view (Q / E)" style={DOCK_BTN} onClick={() => threeRef.current?.rotate(1)}>
+          &#8635;
         </button>
         <button
           type="button"

@@ -77,6 +77,23 @@ export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 8;
 export const clampZoom = (zoom: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom));
 
+/** Wheel zoom is exponential in the scroll distance; the + / - buttons and keys use the same curve (one step = this many 100 px notches). */
+const WHEEL_ZOOM_RATE = 0.001;
+const ZOOM_STEP_PX = 300;
+export const wheelZoomFactor = (deltaY: number): number => Math.exp(-deltaY * WHEEL_ZOOM_RATE);
+/** One press of + (direction 1) or - (direction -1): about 1.35x. */
+export const zoomStepFactor = (direction: 1 | -1): number => wheelZoomFactor(-direction * ZOOM_STEP_PX);
+
+/** A press that moved under 6 px and lasted under 250 ms is a tap (select), anything else is a drag. */
+export const TAP_MAX_PX = 6;
+export const TAP_MAX_MS = 250;
+export const isTap = (a: { x: number; y: number; t: number }, b: { x: number; y: number; t: number }): boolean =>
+  Math.hypot(b.x - a.x, b.y - a.y) <= TAP_MAX_PX && b.t - a.t <= TAP_MAX_MS;
+
+/** The Reset button lights up once the view differs from the overview (zoom, tilt, or panned more than 0.6 units away). */
+export const cameraMoved = (zoom: number, tilt: number, panDist: number, quarter = 0): boolean =>
+  Math.abs(zoom - 1) > 0.05 || tilt > 0.05 || panDist > 0.6 || ((Math.round(quarter) % 4) + 4) % 4 !== 0;
+
 /** While the character travels the camera holds about this half-width of street (scene units), at zoom 4-5. */
 const FOLLOW_HALF_UNITS = 4.5;
 export const FOLLOW_ZOOM_MIN = 4;
@@ -116,16 +133,31 @@ export function fitAllScene(scene: Scene): Fit {
 }
 
 /**
+ * The camera orbits the home by `quarter` quarter-turns (counter-clockwise seen from above, camera (1,1) -> (1,-1) for one).
+ * Fitting is done as if the camera stayed at (1,1,1) and the scene turned the other way, so this undoes the turn on (x, z).
+ */
+export function turnedBack(x: number, z: number, quarter: number): { x: number; z: number } {
+  const q = ((Math.round(quarter) % 4) + 4) % 4;
+  const clean = (n: number) => (n === 0 ? 0 : n);
+  if (q === 1) return { x: clean(-z), z: clean(x) };
+  if (q === 2) return { x: clean(-x), z: clean(-z) };
+  if (q === 3) return { x: clean(z), z: clean(-x) };
+  return { x, z };
+}
+
+/**
  * Half-width of the isometric ortho frustum (scene units) that holds this week's cafes, towers' tops
  * included, plus ~10% on a screen of this width/height. The camera looks down (1,1,1): screen x is
  * (x - z) / sqrt 2 and screen y is (-x + 2y - z) / sqrt 6, centred on the origin (home).
+ * With `quarter` quarter-turns of the camera the same holds for the turned view.
  */
-export function isoFit(scene: Scene, aspect: number): number {
+export function isoFit(scene: Scene, aspect: number, quarter = 0): number {
   const towers = framedTowers(scene);
   if (towers.length === 0) return currentRingUnits(scene) * FIT_MARGIN;
   const a = Math.max(aspect, 0.2);
   let half = 0;
-  for (const t of towers) {
+  for (const tower of towers) {
+    const t = { ...tower, ...turnedBack(tower.x, tower.z, quarter) };
     const sx = Math.abs(t.x - t.z) / Math.SQRT2 + TOWER_HALF_UNITS;
     const foot = Math.abs(t.x + t.z) / Math.sqrt(6);
     const top = Math.abs(-t.x - t.z + 2 * (t.height + TAG_LIFT_UNITS)) / Math.sqrt(6);

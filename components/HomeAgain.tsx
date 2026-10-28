@@ -114,6 +114,7 @@ function useMeasured(measure: (el: HTMLElement) => number): [number, (el: HTMLEl
 
 const barBottom = (el: HTMLElement) => Math.round(el.getBoundingClientRect().bottom);
 const outerHeight = (el: HTMLElement) => el.offsetHeight;
+const outerWidth = (el: HTMLElement) => el.offsetWidth;
 
 export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend }) {
   const [journey, setJourney] = useState<JourneyState | null>(null);
@@ -134,6 +135,14 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   const [barInset, barRef] = useMeasured(barBottom);
   const [sheetHeight, sheetRef] = useMeasured(outerHeight);
   const [qlooBottom, qlooRef] = useMeasured(barBottom);
+  const [qlooWidth, qlooWidthRef] = useMeasured(outerWidth);
+  const qlooBoth = useCallback(
+    (el: HTMLElement | null) => {
+      qlooRef(el);
+      qlooWidthRef(el);
+    },
+    [qlooRef, qlooWidthRef],
+  );
   const inflight = useRef(false);
   const dragFrom = useRef<number | null>(null);
   const dragged = useRef(false);
@@ -337,7 +346,13 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         data-tour="world"
         data-ui-moment="chart"
         className="absolute inset-0 isolate"
-        style={{ "--stage-inset-bottom": `calc(var(--dock-h, 0px) + ${compact && !panels.sheetOpen && sheetHeight ? sheetHeight + 12 : 0}px)` } as CSSProperties}
+        style={{
+          "--stage-inset-bottom": `calc(var(--dock-h, 0px) + ${compact && !panels.sheetOpen && sheetHeight ? sheetHeight + 12 : 0}px)`,
+          // Wide screens keep the Qloo column on the right, so the camera dock sits just left of it.
+          "--stage-inset-right": `${!compact && stage ? qlooWidth + 12 : 0}px`,
+          // On a phone the dock would sit under the start card or the open café sheet, so it steps aside.
+          "--camera-dock-display": compact && (showStart || (panels.sheetOpen && cards.length > 0)) ? "none" : "flex",
+        } as CSSProperties}
       >
         <World
           state={showStart ? idle : (journey ?? idle)}
@@ -438,7 +453,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
             </header>
 
             <div
-              ref={qlooRef}
+              ref={qlooBoth}
               className={`pointer-events-auto row-start-2 min-h-0 flex-col lg:col-start-3 lg:row-start-2 lg:self-start ${compact && panels.sheetOpen && !panels.qlooOpen ? "hidden" : "flex"}`}
               style={{ maxHeight: "100%" }}
             >
