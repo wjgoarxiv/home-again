@@ -19,6 +19,7 @@ import {
 } from "@/lib/autoplay";
 import type { Card, JourneyState, Verdict } from "@/lib/schema";
 import { sfx } from "@/lib/sfx";
+import { placeLabel, type Rect } from "@/lib/spotLabel";
 
 export type { Trace };
 
@@ -209,6 +210,7 @@ const TOUR_CSS = `
 @keyframes tour-press { from { transform: translateY(0); } to { transform: translateY(3px); } }
 .tour-caption { animation: tour-slide 240ms steps(3, end) both; }
 .dock-caption { font-size: var(--fs-base); line-height: 1.35; min-height: calc(var(--fs-base) * 1.35 * 4); }
+@media (max-width: 480px) { .dock-caption { font-size: var(--fs-md); line-height: 1.3; min-height: calc(var(--fs-md) * 1.3 * 3); } }
 @media (min-width: 768px) { .dock-caption { font-size: var(--fs-lg); min-height: calc(var(--fs-lg) * 1.35 * 4); } }
 @media (min-width: 900px) { .dock-caption { min-height: calc(var(--fs-lg) * 1.35 * 3); } }
 .tour-spot { animation: tour-snap 240ms steps(3, end) both; }
@@ -258,9 +260,37 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/** Everything on screen the badge must not sit on: buttons, links, headings and fields outside the dock and the outline. */
+function obstacleRects(dockHeight: number): Rect[] {
+  const out: Rect[] = [];
+  document.querySelectorAll<HTMLElement>("button, a, h1, h2, h3, h4, input, select, textarea").forEach((el) => {
+    if (el.closest("[aria-label='Guided demo'], .tour-spot")) return;
+    const b = visibleBox(el, dockHeight);
+    if (b) out.push({ left: b.left, top: b.top, right: b.left + b.width, bottom: b.top + b.height });
+  });
+  return out;
+}
+
+/** Badge spots around (and, as a last resort, inside) the outline, in order of preference. */
+function labelCandidates(box: Box, w: number, h: number, target: TourTarget, winW: number): Rect[] {
+  const r = (left: number, top: number): Rect => ({ left, top, right: left + w, bottom: top + h });
+  const right = box.left + box.width;
+  const bottom = box.top + box.height;
+  const inBottom = [r(box.left + (box.width - w) / 2, bottom - h), r(box.left + 6, bottom - h), r(right - 6 - w, bottom - h)];
+  const inTop = [r(right - 6 - w, box.top + 3), r(box.left + 6, box.top + 3)];
+  // The map fills the screen, so its badge sits inside the outline.
+  if (target === "world") return [...inBottom, ...inTop];
+  const outside = [r(box.left - 3, box.top - h), r(box.left - 3, bottom), r(right + 3 - w, box.top - h), r(right + 3 - w, bottom)];
+  // A card in the side panel puts its badge out on the map instead of over the panel's title.
+  const beside = target === "cards" && right + 150 < winW ? [r(right + 8, box.top - 3)] : [];
+  return [...beside, ...outside, ...inBottom.slice(2), ...inTop];
+}
+
 /** Outline and badge on the region the current step is about. Fixed-position, so it never changes layout. */
 function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number }) {
   const [box, setBox] = useState<Box | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
   const { id, target, focusId } = step;
   const stepRef = useRef(step);
   stepRef.current = step;
@@ -269,10 +299,16 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
 
   useEffect(() => {
     let alive = true;
+    setPos(null);
     const measure = () => {
       if (!alive) return;
       const el = findTarget(stepRef.current);
       const next = el ? visibleBox(el, dockRef.current) : null;
+      const lab = labelRef.current?.getBoundingClientRect();
+      if (next && lab) {
+        const spot = placeLabel(labelCandidates(next, lab.width, lab.height, stepRef.current.target, window.innerWidth), obstacleRects(dockRef.current), { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight - dockRef.current });
+        setPos((prev) => (prev && prev.left === Math.round(spot.left) && prev.top === Math.round(spot.top) ? prev : { left: Math.round(spot.left), top: Math.round(spot.top) }));
+      }
       setBox((prev) => (prev === next || (prev && next && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.height === next.height) ? prev : next));
     };
     // Panels open and close as a step starts, so measure a few times while they settle.
@@ -303,11 +339,6 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
   }, [id, target, focusId]);
 
   if (!box) return null;
-  // The map fills the screen, so its label sits inside the outline; other regions wear it outside, below when there is no room above.
-  const labelInside = target === "world";
-  const labelBelow = box.top < 34;
-  // A card in the side panel puts its label out on the map instead of over the panel's title.
-  const labelRight = target === "cards" && box.left + box.width + 150 < window.innerWidth;
   return (
     <div
       key={id}
@@ -327,13 +358,12 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
       }}
     >
       <span
+        ref={labelRef}
         style={{
-          position: "absolute",
-          ...(labelInside
-            ? { left: "50%", bottom: 0, transform: "translateX(-50%)" }
-            : labelRight
-              ? { left: "100%", top: -3, marginLeft: 8 }
-              : { left: -3, ...(labelBelow ? { top: "100%" } : { bottom: "100%" }) }),
+          position: "fixed",
+          left: pos?.left ?? 0,
+          top: pos?.top ?? 0,
+          visibility: pos ? "visible" : "hidden",
           background: "var(--c-accent)",
           color: "var(--c-on-accent)",
           font: "700 var(--fs-sm)/1 var(--font-text)",
