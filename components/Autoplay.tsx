@@ -345,7 +345,7 @@ const BAR: CSSProperties = {
 export function WatchButton({ tour, busy }: { tour: AutoplayControls; busy: boolean }) {
   return (
     <button type="button" className="ui-btn ui-btn--primary" onClick={tour.start} disabled={tour.active || busy}>
-      ▶ Watch a 40-second demo
+      ▶ Watch a 1-minute demo
     </button>
   );
 }
