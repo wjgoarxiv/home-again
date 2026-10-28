@@ -227,3 +227,37 @@ export function buildScene(
 
   return { towers, rings, home, beams, focusId };
 }
+
+export type Box = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Where a label of half-size (hw, hh) centred on (cx, cy) can sit without covering a floating panel and inside `bounds`.
+ * Returns the nearest free spot (the point itself when it is already clear), or null when there is none, so the caller can hide the label.
+ */
+export function placeClear(cx: number, cy: number, hw: number, hh: number, panels: Box[], bounds: Box, gap = 4): { x: number; y: number } | null {
+  const pin = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi));
+  const inside = (x: number, y: number) => x - hw >= bounds.left && x + hw <= bounds.right && y - hh >= bounds.top && y + hh <= bounds.bottom;
+  const hits = (x: number, y: number) =>
+    panels.some((p) => x + hw > p.left - gap && x - hw < p.right + gap && y + hh > p.top - gap && y - hh < p.bottom + gap);
+  const x0 = pin(cx, bounds.left + hw, bounds.right - hw);
+  const y0 = pin(cy, bounds.top + hh, bounds.bottom - hh);
+  if (!hits(x0, y0)) return { x: x0, y: y0 };
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (const p of panels) {
+    const spots = [
+      { x: p.left - gap - hw, y: y0 },
+      { x: p.right + gap + hw, y: y0 },
+      { x: x0, y: p.top - gap - hh },
+      { x: x0, y: p.bottom + gap + hh },
+    ];
+    for (const s of spots) {
+      const d = Math.hypot(s.x - cx, s.y - cy);
+      if (d < bestD && inside(s.x, s.y) && !hits(s.x, s.y)) {
+        best = s;
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}

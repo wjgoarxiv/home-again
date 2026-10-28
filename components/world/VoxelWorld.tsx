@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { clampZoom, compactLabel, fitAllScene, fitScene, followZoom, isoFit } from "../../lib/world";
+import { clampZoom, compactLabel, fitAllScene, fitScene, followZoom, isoFit, placeClear, type Box } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
 import { buildGraph, polylinesFromSnapshot, type P, type StreetGraph, type TravelMode } from "../../lib/route";
 import { buildTown, planTown, seedFromString, streetPolylines, type TownCafe, type TownPalette } from "./town";
@@ -41,7 +41,10 @@ type Palette = {
   lineStrong: string;
 };
 
-type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number; hide: boolean };
+/** `arrow` (degrees, 0 = right): the tag cannot sit on its tower (a panel or the screen edge is in the way), so a small edge arrow points to it. */
+type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number; hide: boolean; arrow?: number };
+const MAX_ARROWS = 3;
+const dirGlyph = (dx: number, dy: number) => (Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "◂" : "▸") : dy < 0 ? "▴" : "▾");
 
 const VOX = 1.8;
 const VOX_H = 1;
@@ -327,8 +330,12 @@ export default function VoxelWorld({
   const modeRef = useRef(travelMode);
   modeRef.current = travelMode;
   const [labels, setLabels] = useState<Label[]>([]);
-  const [you, setYou] = useState<{ left: number; top: number; away: boolean }>({ left: 0, top: 0, away: false });
-  const [house, setHouse] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const [you, setYou] = useState<{ left: number; top: number } | null>(null);
+  const [house, setHouse] = useState<{ left: number; top: number; dir: string } | null>(null);
+  const keyRef = useRef<HTMLParagraphElement>(null);
+  const probeRef = useRef<HTMLDivElement>(null);
+  const prioRef = useRef<(string | null | undefined)[]>([]);
+  prioRef.current = [selectedId, focusId];
   const [homeLabel, setHomeLabel] = useState<{
     left?: number;
     top?: number;
@@ -336,6 +343,8 @@ export default function VoxelWorld({
     bottom?: number;
     transform?: string;
     docked?: boolean;
+    dir?: string;
+    hidden?: boolean;
   }>({ left: 0, top: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
   const threeRef = useRef<ThreeState | null>(null);
@@ -464,62 +473,117 @@ export default function VoxelWorld({
     st.renderNow = render;
 
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(hi, v));
+    // Floating panels, the key, the data credit and the camera dock cover the world; labels keep out of their rects (refreshed every 200 ms).
+    let clearAt = -1e9;
+    let clearRects: Box[] = [];
+    const clearOf = (w: number, h: number): Box[] => {
+      const now = performance.now();
+      if (now - clearAt < 200) return clearRects;
+      clearAt = now;
+      const cr = container.getBoundingClientRect();
+      const rel = (r: DOMRect): Box => ({ left: r.left - cr.left, top: r.top - cr.top, right: r.right - cr.left, bottom: r.bottom - cr.top });
+      const out: Box[] = [];
+      document.querySelectorAll<HTMLElement>(".ui-panel, [data-camera-dock]").forEach((el) => {
+        if (el.contains(container)) return;
+        const r = rel(el.getBoundingClientRect());
+        if (r.right - r.left > 2 && r.bottom - r.top > 2 && r.right > 0 && r.left < w && r.bottom > 0 && r.top < h) out.push(r);
+      });
+      const probe = probeRef.current;
+      if (probe) {
+        const base = rel(probe.getBoundingClientRect()).bottom;
+        out.push({ left: 0, top: base - 28, right: 244, bottom: h });
+      }
+      const k = keyRef.current;
+      if (k && k.offsetParent) out.push(rel(k.getBoundingClientRect()));
+      clearRects = out;
+      return out;
+    };
     const updateLabels = () => {
       const w = container.clientWidth || 1;
       const h = container.clientHeight || 1;
       const current = sceneRef.current;
       const v = new THREE.Vector3();
       const inset = st.insetTop;
-      const next: Label[] = current.towers.map((t, i) => {
+      const panels = clearOf(w, h);
+      const bounds: Box = { left: 8, top: 8 + inset, right: w - 8, bottom: h - 8 };
+      const boxAt = (x: number, y: number, hw: number, hh: number): Box => ({ left: x - hw, top: y - hh, right: x + hw, bottom: y + hh });
+      const placed: Box[] = [];
+      const spots = current.towers.map((t) => {
         const top = st.tops.get(t.id) ?? VOX_H * t.height;
         v.set(t.x, top + 0.4, t.z).project(camera);
         const px = (v.x * 0.5 + 0.5) * w;
         const py = (-v.y * 0.5 + 0.5) * h;
-        return {
-          id: t.id,
-          n: i + 1,
-          name: t.name,
-          distanceM: t.distanceM,
-          left: clamp(px, 24, w - 24),
-          top: clamp(py, 24 + inset, h - 24),
-          hide: st.follow && (px < 0 || px > w || py < inset || py > h),
-        };
+        // The tag is 26 px tall and stands on the tower top; if a panel or the screen edge covers that spot it becomes an arrow.
+        const spot = placeClear(px, py - 13, 16, 16, panels, bounds);
+        const ok = spot !== null && Math.hypot(spot.x - px, spot.y + 13 - py) < 8;
+        if (ok) placed.push(boxAt(px, py - 13, 16, 16));
+        return { px, py, ok };
       });
       v.set(current.home.x, 7, current.home.z).project(camera);
       const hx = (v.x * 0.5 + 0.5) * w;
       const hy = (-v.y * 0.5 + 0.5) * h;
-      const docked = hx < 0 || hx > w || hy < 0 || hy > h;
-      // The traveller's own dot ("where am I") is projected the same way as the tags.
-      v.set(st.pos.x, 1.4, st.pos.z).project(camera);
-      const yx = clamp((v.x * 0.5 + 0.5) * w, 24, w - 24);
-      const yy = clamp((-v.y * 0.5 + 0.5) * h, 24 + inset, h - 24);
-      // The little house is "your place"; the "You" dot only appears once you have left its doorstep.
-      const away = Math.hypot(st.pos.x, st.pos.z) > 4;
+      const wideChip = w >= 640;
+      const off = hx < 0 || hx > w || hy < 0 || hy > h;
+      // The old regular's label: full text over its beacon, short text with a direction mark when it has to sit away from it.
+      const withTags = [...panels, ...placed];
+      const full = placeClear(hx, hy - 18, wideChip ? 150 : 80, 12, withTags, bounds);
+      const near = !off && full !== null && Math.hypot(full.x - hx, full.y + 18 - hy) < 8;
+      const short = near ? full : placeClear(hx, hy, 80, 12, withTags, bounds);
+      const docked = !near;
+      const homeAt = short ?? { x: 0, y: 0 };
+      const homeDir = !near && short ? dirGlyph(hx - short.x, hy - short.y) : "";
+      if (short) placed.push(boxAt(short.x, short.y, near ? (wideChip ? 150 : 80) : 80, 12));
+      // Edge arrows avoid panels, the tags already in place, the old-regular label and each other.
+      const next: Label[] = current.towers.map((t, i) => {
+        const base = { id: t.id, n: i + 1, name: t.name, distanceM: t.distanceM };
+        const { px, py, ok } = spots[i];
+        if (ok) return { ...base, left: px, top: py, hide: false };
+        return { ...base, left: 0, top: 0, hide: true, arrow: undefined as number | undefined };
+      });
+      // At most three arrows: the chosen or focused café first, then the nearest.
+      const prio = prioRef.current;
+      const order = next
+        .map((l, i) => i)
+        .filter((i) => !spots[i].ok)
+        .sort((i, j) => Number(prio.includes(next[j].id)) - Number(prio.includes(next[i].id)) || next[i].distanceM - next[j].distanceM);
+      let arrows = 0;
+      for (const i of order) {
+        if (arrows >= MAX_ARROWS) break;
+        const { px, py } = spots[i];
+        const edge = placeClear(px, py - 13, 38, 13, [...panels, ...placed], bounds, 6);
+        if (!edge) continue;
+        placed.push(boxAt(edge.x, edge.y, 38, 13));
+        arrows++;
+        next[i] = { ...next[i], left: edge.x, top: edge.y, hide: false, arrow: (Math.atan2(py - 13 - edge.y, px - edge.x) * 180) / Math.PI };
+      }
+      // The traveller's "You" tag hangs from the little diamond that floats over the character, so it follows the taxi and the bus too.
+      const marker = root.getObjectByName("traveler:marker");
+      let yx = -1;
+      let yy = -1;
+      let youSpot: { x: number; y: number } | null = null;
+      if (marker && (st.trip || Math.hypot(st.pos.x, st.pos.z) > 4)) {
+        marker.getWorldPosition(v);
+        v.project(camera);
+        yx = (v.x * 0.5 + 0.5) * w;
+        yy = (-v.y * 0.5 + 0.5) * h;
+        const spot = placeClear(yx, yy - 22, 28, 18, panels, bounds);
+        if (spot && Math.hypot(spot.x - yx, spot.y + 22 - yy) < 8) youSpot = { x: yx, y: yy };
+      }
+      // The little house is "your place".
       v.set(0, 3.2, 0).project(camera);
-      const ox = clamp((v.x * 0.5 + 0.5) * w, 56, w - 56);
-      const oy = clamp((-v.y * 0.5 + 0.5) * h, 24 + inset, h - 24);
+      const bx = (v.x * 0.5 + 0.5) * w;
+      const by = (-v.y * 0.5 + 0.5) * h;
+      const houseSpot = placeClear(bx, by - 11, 52, 12, [...panels, ...placed], bounds);
+      const houseAt = houseSpot ? { left: houseSpot.x, top: houseSpot.y, dir: Math.hypot(houseSpot.x - bx, houseSpot.y - (by - 11)) < 8 ? "" : dirGlyph(bx - houseSpot.x, by - 11 - houseSpot.y) } : null;
       const key =
-        next.map((l) => `${l.id}:${Math.round(l.left)}:${Math.round(l.top)}:${l.hide ? 1 : 0}`).join("|") +
-        `#${Math.round(hx)}:${Math.round(hy)}:${inset}:${Math.round(yx)}:${Math.round(yy)}:${away ? 1 : 0}:${Math.round(ox)}:${Math.round(oy)}`;
+        next.map((l) => `${l.id}:${Math.round(l.left)}:${Math.round(l.top)}:${l.hide ? 1 : 0}:${Math.round(l.arrow ?? 999)}`).join("|") +
+        `#${Math.round(homeAt.x)}:${Math.round(homeAt.y)}:${docked ? 1 : 0}:${short ? 1 : 0}:${homeDir}:${inset}:${youSpot ? `${Math.round(yx)}:${Math.round(yy)}` : "-"}:${houseAt ? `${Math.round(houseAt.left)}:${Math.round(houseAt.top)}:${houseAt.dir}` : "-"}`;
       if (key === st.labelKey) return;
       st.labelKey = key;
       setLabels(next);
-      setYou({ left: yx, top: yy, away });
-      setHouse({ left: ox, top: oy });
-      setHomeLabel(
-        docked
-          ? {
-              ...(hx <= w / 2 ? { left: 8 } : { right: 8 }),
-              ...(hy <= h / 2 ? { top: 8 + inset } : { bottom: 8 }),
-              docked: true,
-            }
-          : {
-              left: clamp(hx, 110, w - 110),
-              top: clamp(hy, 40 + inset, h - 20),
-              transform: "translate(-50%, -130%)",
-              docked: false,
-            },
-      );
+      setYou(youSpot ? { left: youSpot.x, top: youSpot.y } : null);
+      setHouse(houseAt);
+      setHomeLabel({ left: homeAt.x, top: homeAt.y, transform: "translate(-50%, -50%)", docked, dir: homeDir, hidden: short === null });
     };
     const renderNow = () => st.render();
 
@@ -1131,13 +1195,14 @@ export default function VoxelWorld({
         style={{
           left: homeLabel.left,
           top: homeLabel.top,
-          right: homeLabel.right,
-          bottom: homeLabel.bottom,
           transform: homeLabel.transform,
           background: "var(--c-ink)",
           color: "var(--c-canvas)",
+          whiteSpace: "nowrap",
+          display: homeLabel.hidden ? "none" : undefined,
         }}
       >
+        {homeLabel.dir === "◂" && <span aria-hidden="true">◂ </span>}
         <span aria-hidden="true">◆ </span>
         {homeLabel.docked ? (
           `Old regular · ${scene.home.short}`
@@ -1147,61 +1212,106 @@ export default function VoxelWorld({
             <span className="sm:hidden">Old regular · {scene.home.short}</span>
           </>
         )}
+        {homeLabel.dir && homeLabel.dir !== "◂" && <span aria-hidden="true"> {homeLabel.dir}</span>}
       </div>
-      <div
-        aria-hidden="true"
-        className="ui-meta pointer-events-none absolute z-10"
-        style={{
-          left: house.left,
-          top: house.top,
-          transform: "translate(-50%, -100%)",
-          background: "var(--c-surface)",
-          color: "var(--w-home)",
-          border: "2px solid var(--w-home)",
-          padding: "0 6px",
-        }}
-      >
-        ⌂ Your place
-      </div>
-      {you.away && (
+      {house && (
         <div
           aria-hidden="true"
-          className="ui-meta pointer-events-none absolute z-10 flex items-center"
-          style={{ left: you.left, top: you.top, transform: "translate(-50%, -150%)", gap: 4 }}
+          className="ui-meta pointer-events-none absolute z-10"
+          style={{
+            left: house.left,
+            top: house.top,
+            transform: "translate(-50%, -50%)",
+            background: "var(--c-surface)",
+            color: "var(--w-home)",
+            border: "2px solid var(--w-home)",
+            padding: "0 6px",
+            whiteSpace: "nowrap",
+          }}
         >
-          <span
-            style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--w-avatar)", border: "2px solid var(--c-ink)" }}
-          />
-          <span style={{ background: "var(--c-surface)", border: "2px solid var(--c-line-strong)", padding: "0 6px" }}>You</span>
+          {house.dir === "◂" && "◂ "}⌂ Your place{house.dir && house.dir !== "◂" ? ` ${house.dir}` : ""}
         </div>
       )}
-      <p
-        className="ui-meta pointer-events-none absolute z-10 hidden flex-wrap items-center sm:flex"
-        aria-label="Map key: numbered tags are cafés and taller towers are better taste matches; the blue house is your place; the orange dot is you; the black label marks your old regular café, far away."
-        style={{
-          right: 8,
-          bottom: "calc(var(--stage-inset-bottom, 0px) + 8px)",
-          maxWidth: "min(520px, calc(100% - 252px))",
-          gap: "2px 12px",
-          background: "var(--c-surface)",
-          color: "var(--c-ink)",
-          border: "2px solid var(--c-line-strong)",
-          padding: "4px 8px",
-        }}
-      >
-        <span aria-hidden="true">
-          <b style={{ border: "2px solid var(--c-line-strong)", padding: "0 4px" }}>1</b> café · taller = better match
-        </span>
-        <span aria-hidden="true" style={{ color: "var(--w-home)" }}>⌂ your place</span>
-        <span aria-hidden="true">
-          <i style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "var(--w-avatar)", border: "2px solid var(--c-ink)" }} /> you
-        </span>
-        <span aria-hidden="true">◆ old regular</span>
-      </p>
+      {you && (
+        <div
+          aria-hidden="true"
+          className="ui-meta pointer-events-none absolute z-10 flex flex-col items-center"
+          style={{ left: you.left, top: you.top, transform: "translate(-50%, -100%)" }}
+        >
+          <span
+            className="flex items-center"
+            style={{ gap: 4, background: "var(--c-surface)", border: "2px solid var(--c-line-strong)", padding: "0 6px 0 4px" }}
+          >
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--w-avatar)", border: "2px solid var(--c-ink)" }} />
+            You
+          </span>
+          <span style={{ width: 2, height: 8, background: "var(--c-line-strong)" }} />
+        </div>
+      )}
+      <div ref={probeRef} aria-hidden="true" className="pointer-events-none absolute" style={{ left: 8, bottom: "calc(var(--stage-inset-bottom, 0px) + 8px)", width: 1, height: 1 }} />
+      {scene.towers.length > 0 && (
+        <p
+          ref={keyRef}
+          className="ui-meta pointer-events-none absolute z-10 hidden flex-wrap items-center sm:flex"
+          aria-label="Map key: numbered tags are cafés and taller towers are better taste matches; the blue house is your place; the orange dot is you; the black label marks your old regular café, far away."
+          style={{
+            left: 8,
+            bottom: "calc(var(--stage-inset-bottom, 0px) + 36px)",
+            maxWidth: "min(520px, calc(100% - 252px))",
+            gap: "2px 12px",
+            background: "var(--c-surface)",
+            color: "var(--c-ink)",
+            border: "2px solid var(--c-line-strong)",
+            padding: "2px 8px",
+          }}
+        >
+          <span aria-hidden="true">
+            <b style={{ border: "2px solid var(--c-line-strong)", padding: "0 4px" }}>1</b> café · taller = better match
+          </span>
+          <span aria-hidden="true" style={{ color: "var(--w-home)" }}>⌂ your place</span>
+          <span aria-hidden="true">
+            <i style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "var(--w-avatar)", border: "2px solid var(--c-ink)" }} /> you
+          </span>
+          <span aria-hidden="true">◆ old regular</span>
+        </p>
+      )}
       {labels.map((label) => {
         const open = label.id === selectedId || label.id === hoverId || label.id === focusId;
-        // While the camera follows the character, tags of towers out of view stay out of the way.
-        if (label.hide && !open) return null;
+        if (label.hide) return null;
+        if (label.arrow !== undefined) {
+          const side = Math.abs(Math.cos((label.arrow * Math.PI) / 180)) > Math.abs(Math.sin((label.arrow * Math.PI) / 180))
+            ? Math.cos((label.arrow * Math.PI) / 180) < 0 ? "left" : "right"
+            : Math.sin((label.arrow * Math.PI) / 180) < 0 ? "up" : "down";
+          return (
+            <button
+              key={label.id}
+              type="button"
+              data-edge-arrow
+              onClick={() => onSelectRef.current(label.id)}
+              aria-label={`${label.n}: ${label.name}, ${Math.round(label.distanceM)} metres, ${side} of the view`}
+              className="ui-meta absolute z-10 flex items-center"
+              style={{
+                left: label.left,
+                top: label.top,
+                transform: "translate(-50%, -50%)",
+                minHeight: 28,
+                gap: 4,
+                padding: "0 6px",
+                background: "var(--c-surface)",
+                border: "2px solid var(--c-line-strong)",
+                outline: label.id === selectedId ? "2px solid var(--c-accent)" : "none",
+                outlineOffset: 2,
+                color: "var(--c-ink)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span aria-hidden="true" style={{ display: "inline-block", transform: `rotate(${Math.round(label.arrow)}deg)` }}>▶</span>
+              <b aria-hidden="true">{label.n}</b>
+              <span aria-hidden="true">{Math.round(label.distanceM)} m</span>
+            </button>
+          );
+        }
         if (!open) {
           return (
             <button

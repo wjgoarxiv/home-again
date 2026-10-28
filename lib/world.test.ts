@@ -16,6 +16,7 @@ import {
   fitScene,
   followZoom,
   isoFit,
+  placeClear,
   project,
   tasteRole,
   towerHeight,
@@ -454,5 +455,26 @@ describe("theta (street-grid rotation)", () => {
     }
     expect(turned.home).toEqual(plain.home);
     expect(turned.rings).toEqual(plain.rings);
+  });
+});
+
+describe("placeClear", () => {
+  const bounds = { left: 0, top: 0, right: 1000, bottom: 600 };
+  const panel = { left: 0, top: 0, right: 300, bottom: 600 };
+
+  it("leaves a clear label where it is and pins an off-screen one inside the bounds", () => {
+    expect(placeClear(600, 300, 13, 13, [panel], bounds)).toEqual({ x: 600, y: 300 });
+    expect(placeClear(2000, -50, 13, 13, [], bounds)).toEqual({ x: 987, y: 13 });
+  });
+
+  it("moves a label that sits under a panel to the panel's free edge", () => {
+    const at = placeClear(120, 200, 13, 13, [panel], bounds);
+    expect(at).not.toBeNull();
+    expect(at!.x).toBe(300 + 4 + 13);
+    expect(at!.y).toBe(200);
+  });
+
+  it("gives up (null) when a panel fills the whole stage", () => {
+    expect(placeClear(500, 300, 13, 13, [{ left: -10, top: -10, right: 1010, bottom: 610 }], bounds)).toBeNull();
   });
 });

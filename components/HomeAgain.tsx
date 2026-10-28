@@ -421,7 +421,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         )}
 
         {stage && (
-          <div className="absolute inset-0 grid grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3 p-3 lg:pb-11 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)_minmax(0,320px)] lg:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)_minmax(0,360px)]">
+          <div className="absolute inset-0 grid grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3 p-3 lg:pb-[72px] lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)_minmax(0,320px)] lg:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)_minmax(0,360px)]">
             <header ref={barRef} className="ui-panel pointer-events-auto col-start-1 row-start-1 lg:col-span-3" style={{ "--panel-pad": "var(--sp-8)", boxShadow: "var(--shadow-overlay)" } as CSSProperties}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <span className="hidden sm:block">
