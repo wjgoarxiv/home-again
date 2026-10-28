@@ -86,4 +86,13 @@ describe("parseJourneyState", () => {
     expect(() => parseJourneyState({ ...fresh, area: { ...area, name: long } })).toThrow();
     expect(() => parseJourneyState({ ...fresh, rejected: [long] })).toThrow();
   });
+
+  it("rejects a saved café with more than seven days of hours or a non-https photo", () => {
+    const fresh = startJourney(seed, area);
+    const cafe = { id: "c1", name: "Cafe", lat: 40.7, lng: -73.9, affinity: 0.5, tags: [] };
+    const days = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`d${i}`, "07:00–15:00"]));
+    expect(() => parseJourneyState({ ...fresh, saved: [{ ...cafe, hours: days }] })).toThrow();
+    expect(() => parseJourneyState({ ...fresh, saved: [{ ...cafe, photoUrl: "javascript:alert(1)" }] })).toThrow();
+    expect(parseJourneyState({ ...fresh, saved: [cafe] }).saved).toHaveLength(1);
+  });
 });

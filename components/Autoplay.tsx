@@ -171,7 +171,7 @@ export function useAutoplay(api: AutoplayApi): AutoplayControls {
             );
           }
         }
-        fresh.submit();
+        if (!apiRef.current.busy) fresh.submit();
       }, SUBMIT_DELAY_MS);
       timers.current.push(submitTimer);
     }, VERDICT_DELAY_MS);

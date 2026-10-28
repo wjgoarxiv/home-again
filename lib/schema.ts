@@ -29,7 +29,7 @@ export const SavedCafeSchema = z.object({
   photoUrl: z.string().max(500).regex(/^https:\/\//).optional(),
   priceLevel: z.number().int().min(1).max(4).optional(),
   blurb: z.string().max(200).optional(),
-  hours: z.record(z.string().max(12), z.string().max(40)).optional(),
+  hours: z.record(z.string().max(12), z.string().max(40)).refine((h) => Object.keys(h).length <= 7, "at most 7 days").optional(),
 });
 
 export const JourneyStateSchema = z.object({
@@ -59,7 +59,7 @@ export const CardSchema = z.object({
   lat: z.number(),
   lng: z.number(),
   affinity: z.number().nullable(),
-  photoUrl: z.string().max(500).optional(),
+  photoUrl: z.string().max(500).regex(/^https:\/\//).optional(),
   hoursToday: z.string().max(40).optional(),
   priceLevel: z.number().int().min(1).max(4).optional(),
   blurb: z.string().max(200).optional(),
