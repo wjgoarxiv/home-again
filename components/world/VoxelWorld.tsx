@@ -2,25 +2,34 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { compactLabel, fitScene } from "../../lib/world";
+import { clampZoom, compactLabel, fitAllScene, fitScene, followZoom, isoFit } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
-import { buildTown, planTown, seedFromString, type TownCafe, type TownPalette } from "./town";
+import { buildGraph, polylinesFromSnapshot, type P, type StreetGraph, type TravelMode } from "../../lib/route";
+import { buildTown, planTown, seedFromString, streetPolylines, type TownCafe, type TownPalette } from "./town";
 import { createLife, type LifeHandle } from "./life";
+import { createTraveler, type TravelerHandle } from "./traveler";
 import type { Street } from "../../lib/life";
 import type { GeoSnapshot } from "../../lib/geomap";
 import { worldPalette, type WorldPalette } from "./palette";
-import { buildRealTown, type CafeSpot, type RealTown } from "./realTown";
+import { buildRealTown, tripFor, type CafeSpot, type RealTown } from "./realTown";
+import type { TripInfo } from "./World";
 
 export type VoxelWorldProps = {
   scene: Scene;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  loading: boolean;
   onReady?: () => void;
   /** Real NYC footprints and streets for this area; null/undefined = procedural town. */
   geo?: GeoSnapshot | null;
   /** Tour focus: the camera steps to this tower. null/undefined = the finale tower (if any) or normal framing. */
   focusId?: string | null;
+  /** Café id to send the user's character to; a change to a new id starts a trip, null cancels one under way. */
+  travelTo?: string | null;
+  travelMode?: TravelMode | "auto";
+  onArrive?: (id: string) => void;
+  onTrip?: (info: TripInfo | null) => void;
+  /** px kept clear at the top for a floating bar (else the CSS var --stage-inset-top is read). */
+  insetTop?: number;
 };
 
 type Palette = {
@@ -32,11 +41,85 @@ type Palette = {
   lineStrong: string;
 };
 
-type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number };
+type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number; hide: boolean };
 
 const VOX = 1.8;
 const VOX_H = 1;
 const LOT_Y = 0.22;
+/** The newcomer's home: where the character starts, a little house on the area centre. */
+const HOME_CLEAR = 2.2;
+const HOME_PAD = 3.2;
+/** The character stands in front of the house door (+z face) and at each café's front corner, not inside the box. */
+const HOME_STEP: P = { x: 0, z: 1.1 };
+const CAFE_STEP = 1.15;
+/** Towers rise in this many steps when new cards arrive. */
+const RISE_STEPS = 4;
+const RISE_MS = 110;
+/** Trips closer than this count as already there. */
+const ARRIVED_M = 3;
+/** The follow camera pauses this long on the arrived character before easing back to the overview. */
+const ARRIVE_HOLD_MS = 1000;
+const EASE_BACK_STEPS = 4;
+const EASE_BACK_MS = 100;
+/** Exponential follow rates (per second) for the camera target and zoom while travelling. */
+const FOLLOW_RATE = 5;
+const FOLLOW_ZOOM_RATE = 2.5;
+
+const EMPTY_GRAPH: StreetGraph = { nodes: [], adj: [] };
+
+type ThreeState = {
+  renderer: THREE.WebGLRenderer;
+  camera: THREE.OrthographicCamera;
+  root: THREE.Scene;
+  content: THREE.Group | null;
+  tops: Map<string, number>;
+  bases: Map<string, number>;
+  target: THREE.Vector3;
+  reduced: boolean;
+  stepTimers: number[];
+  prevCounts: Map<string, number>;
+  palette: Palette;
+  world: WorldPalette;
+  realTown: RealTown | null;
+  proc: THREE.Group | null;
+  lifeStreets: Street[] | null;
+  pointers: Map<number, { x: number; y: number }>;
+  pinchDist: number | null;
+  /** Ortho half-width of the fitted overview (zoom 1), scene units. */
+  fitHalf: number;
+  /** How far the camera target may be panned from the origin. */
+  panLimit: number;
+  fitKey: string;
+  lastFocus: string | null;
+  applyFit: () => void;
+  render: () => void;
+  renderNow: () => void;
+  setupLife: () => void;
+  life: LifeHandle | null;
+  lifeRaf: number;
+  lastT: number;
+  labelKey: string;
+  visible: boolean;
+  densityBucket: number;
+  streets: Street[];
+  insetTop: number;
+  readInset: () => void;
+  graph: StreetGraph | null;
+  traveler: TravelerHandle | null;
+  /** Where the character stands (home's doorstep until the first trip, then wherever the last trip ended). */
+  pos: P;
+  trip: TripInfo | null;
+  /** The travelMode prop the trip under way was planned with. */
+  tripMode: TravelMode | "auto";
+  /** The camera follows the character (trip under way, and the hold before it eases back). */
+  follow: boolean;
+  followZ: number;
+  camTimers: number[];
+  guard: number | null;
+  travelKey: string | null;
+  startTrip: (to: { id: string; x: number; z: number }) => void;
+  cancelTrip: () => void;
+};
 
 function readPalette(): Palette {
   const css = (name: string, fallback: string) => {
@@ -152,7 +235,77 @@ function place(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: nu
   mesh.setColorAt(i, new THREE.Color(color));
 }
 
-export default function VoxelWorld({ scene, selectedId, onSelect, loading, onReady, geo = null, focusId: focusProp = null }: VoxelWorldProps) {
+/** A little house of three boxes (walls, roof slab, door) on the area centre, in the home colour. */
+function houseMesh(world: WorldPalette): THREE.InstancedMesh {
+  const roof = new THREE.Color(world.home).multiplyScalar(0.6).getStyle();
+  const mesh = boxMesh(3, world.home);
+  mesh.userData.layer = "house";
+  place(mesh, 0, 0, LOT_Y + 0.55, 0, 1.5, 1.1, 1.5, world.home);
+  place(mesh, 1, 0, LOT_Y + 1.25, 0, 1.9, 0.3, 1.9, roof);
+  place(mesh, 2, 0, LOT_Y + 0.3, 0.76, 0.4, 0.6, 0.06, world.litWindow);
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  return mesh;
+}
+
+/**
+ * Buildings are taller than the street is wide, so from the isometric camera they hide the character most of the
+ * time. Every mesh under `rig` gets a see-through twin that draws only where something is in front of the original
+ * (a flat translucent silhouette), kept in step with the original each frame.
+ */
+function makeGhosts(rig: THREE.Group, color: string): { sync: () => void } {
+  const material = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.5,
+    depthFunc: THREE.GreaterDepth,
+    depthWrite: false,
+  });
+  const pairs: { src: THREE.Mesh; ghost: THREE.Mesh }[] = [];
+  for (const src of [...rig.children] as THREE.Mesh[]) {
+    if (!src.isMesh) continue;
+    const instanced = src as THREE.InstancedMesh;
+    let ghost: THREE.Mesh;
+    if (instanced.isInstancedMesh) {
+      const g = new THREE.InstancedMesh(src.geometry, material, instanced.instanceMatrix.count);
+      g.instanceMatrix = instanced.instanceMatrix;
+      ghost = g;
+    } else {
+      ghost = new THREE.Mesh(src.geometry, material);
+    }
+    ghost.frustumCulled = false;
+    ghost.renderOrder = 5;
+    rig.add(ghost);
+    pairs.push({ src, ghost });
+  }
+  return {
+    sync: () => {
+      for (const { src, ghost } of pairs) {
+        ghost.visible = src.visible;
+        if ((src as THREE.InstancedMesh).isInstancedMesh) (ghost as THREE.InstancedMesh).count = (src as THREE.InstancedMesh).count;
+        else {
+          ghost.position.copy(src.position);
+          ghost.quaternion.copy(src.quaternion);
+          ghost.scale.copy(src.scale);
+        }
+      }
+    },
+  };
+}
+
+export default function VoxelWorld({
+  scene,
+  selectedId,
+  onSelect,
+  onReady,
+  geo = null,
+  focusId: focusProp = null,
+  travelTo = null,
+  travelMode = "auto",
+  onArrive,
+  onTrip,
+  insetTop,
+}: VoxelWorldProps) {
   const focusId = focusProp ?? scene.focusId;
   const containerRef = useRef<HTMLDivElement>(null);
   const onSelectRef = useRef(onSelect);
@@ -161,8 +314,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
   onReadyRef.current = onReady;
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
-  const loadingRef = useRef(loading);
-  loadingRef.current = loading;
+  const onArriveRef = useRef(onArrive);
+  onArriveRef.current = onArrive;
+  const onTripRef = useRef(onTrip);
+  onTripRef.current = onTrip;
+  const modeRef = useRef(travelMode);
+  modeRef.current = travelMode;
   const [labels, setLabels] = useState<Label[]>([]);
   const [homeLabel, setHomeLabel] = useState<{
     left?: number;
@@ -173,40 +330,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     docked?: boolean;
   }>({ left: 0, top: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
-  const threeRef = useRef<{
-    renderer: THREE.WebGLRenderer;
-    camera: THREE.OrthographicCamera;
-    root: THREE.Scene;
-    content: THREE.Group | null;
-    scan: THREE.InstancedMesh | null;
-    tops: Map<string, number>;
-    bases: Map<string, number>;
-    target: THREE.Vector3;
-    reduced: boolean;
-    scanAngle: number;
-    scanTimer: number | null;
-    stepTimers: number[];
-    prevCounts: Map<string, number>;
-    palette: Palette;
-    world: WorldPalette;
-    realTown: RealTown | null;
-    proc: THREE.Group | null;
-    lifeStreets: Street[] | null;
-    pointers: Map<number, { x: number; y: number }>;
-    pinchDist: number | null;
-    fitHalf: number;
-    fitKey: string;
-    lastFocus: string | null;
-    applyFit: () => void;
-    renderNow: () => void;
-    life: LifeHandle | null;
-    lifeRaf: number;
-    lastT: number;
-    labelKey: string;
-    visible: boolean;
-    densityBucket: number;
-    streets: Street[];
-  } | null>(null);
+  const threeRef = useRef<ThreeState | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -235,41 +359,66 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
 
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     const target = new THREE.Vector3(0, 0, 0);
-    const st = {
+    const rig = new THREE.Group();
+    root.add(rig);
+    const traveler = createTraveler({ scene: rig, palette: world });
+    traveler.place(HOME_STEP.x, HOME_STEP.z);
+    const ghosts = makeGhosts(rig, world.avatar);
+    const st: ThreeState = {
       renderer,
       camera,
       root,
-      content: null as THREE.Group | null,
-      scan: null as THREE.InstancedMesh | null,
-      tops: new Map<string, number>(),
-      bases: new Map<string, number>(),
+      content: null,
+      tops: new Map(),
+      bases: new Map(),
       target,
       reduced,
-      scanAngle: 0,
-      scanTimer: null as number | null,
-      stepTimers: [] as number[],
-      prevCounts: new Map<string, number>(),
+      stepTimers: [],
+      prevCounts: new Map(),
       palette,
       world,
-      realTown: null as RealTown | null,
-      proc: null as THREE.Group | null,
-      lifeStreets: null as Street[] | null,
-      pointers: new Map<number, { x: number; y: number }>(),
-      pinchDist: null as number | null,
+      realTown: null,
+      proc: null,
+      lifeStreets: null,
+      pointers: new Map(),
+      pinchDist: null,
       fitHalf: 46,
+      panLimit: 46,
       fitKey: "",
       lastFocus: null,
       applyFit: () => {},
+      render: () => {},
       renderNow: () => {},
-      life: null as LifeHandle | null,
+      setupLife: () => {},
+      life: null,
       lifeRaf: 0,
       lastT: 0,
       labelKey: "",
       visible: true,
       densityBucket: -1,
       streets: [],
+      insetTop: 0,
+      readInset: () => {},
+      graph: null,
+      traveler,
+      pos: { ...HOME_STEP },
+      trip: null,
+      tripMode: "auto",
+      follow: false,
+      followZ: 4.5,
+      camTimers: [],
+      guard: null,
+      travelKey: null,
+      startTrip: () => {},
+      cancelTrip: () => {},
     };
     threeRef.current = st;
+
+    const readInset = () => {
+      st.insetTop = Math.max(0, parseFloat(getComputedStyle(container).getPropertyValue("--stage-inset-top")) || 0);
+    };
+    st.readInset = readInset;
+    readInset();
 
     const fit = () => {
       const w = container.clientWidth || 1;
@@ -277,10 +426,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, w < 640 ? 1.5 : 2));
       renderer.setSize(w, h, false);
       const aspect = Math.max(w / h, 0.2);
-      const viewSize = (2 * st.fitHalf) / aspect;
-      const halfH = viewSize / 2;
-      camera.left = -halfH * aspect;
-      camera.right = halfH * aspect;
+      st.fitHalf = isoFit(sceneRef.current, aspect);
+      const halfH = st.fitHalf / aspect;
+      camera.left = -st.fitHalf;
+      camera.right = st.fitHalf;
       camera.top = halfH;
       camera.bottom = -halfH;
       camera.updateProjectionMatrix();
@@ -293,11 +442,16 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       camera.position.copy(st.target).add(iso);
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
+      ghosts.sync();
       renderer.render(root, camera);
       container.dataset.draws = String(renderer.info.render.calls);
       container.dataset.tris = String(renderer.info.render.triangles);
+      container.dataset.cam = `${camera.zoom.toFixed(2)} ${st.target.x.toFixed(1)} ${st.target.z.toFixed(1)}`;
+      container.dataset.pos = `${st.pos.x.toFixed(1)} ${st.pos.z.toFixed(1)}`;
       updateLabels();
     };
+    st.render = render;
+    st.renderNow = render;
 
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(hi, v));
     const updateLabels = () => {
@@ -305,16 +459,20 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       const h = container.clientHeight || 1;
       const current = sceneRef.current;
       const v = new THREE.Vector3();
+      const inset = st.insetTop;
       const next: Label[] = current.towers.map((t, i) => {
         const top = st.tops.get(t.id) ?? VOX_H * t.height;
         v.set(t.x, top + 0.4, t.z).project(camera);
+        const px = (v.x * 0.5 + 0.5) * w;
+        const py = (-v.y * 0.5 + 0.5) * h;
         return {
           id: t.id,
           n: i + 1,
           name: t.name,
           distanceM: t.distanceM,
-          left: clamp((v.x * 0.5 + 0.5) * w, 24, w - 24),
-          top: clamp((-v.y * 0.5 + 0.5) * h, 24, h - 24),
+          left: clamp(px, 24, w - 24),
+          top: clamp(py, 24 + inset, h - 24),
+          hide: st.follow && (px < 0 || px > w || py < inset || py > h),
         };
       });
       v.set(current.home.x, 7, current.home.z).project(camera);
@@ -322,8 +480,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       const hy = (-v.y * 0.5 + 0.5) * h;
       const docked = hx < 0 || hx > w || hy < 0 || hy > h;
       const key =
-        next.map((l) => `${l.id}:${Math.round(l.left)}:${Math.round(l.top)}`).join("|") +
-        `#${Math.round(hx)}:${Math.round(hy)}`;
+        next.map((l) => `${l.id}:${Math.round(l.left)}:${Math.round(l.top)}:${l.hide ? 1 : 0}`).join("|") +
+        `#${Math.round(hx)}:${Math.round(hy)}:${inset}`;
       if (key === st.labelKey) return;
       st.labelKey = key;
       setLabels(next);
@@ -331,22 +489,18 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         docked
           ? {
               ...(hx <= w / 2 ? { left: 8 } : { right: 8 }),
-              ...(hy <= h / 2 ? { top: 8 } : { bottom: 8 }),
+              ...(hy <= h / 2 ? { top: 8 + inset } : { bottom: 8 }),
               docked: true,
             }
           : {
               left: clamp(hx, 110, w - 110),
-              top: clamp(hy, 40, h - 20),
+              top: clamp(hy, 40 + inset, h - 20),
               transform: "translate(-50%, -130%)",
               docked: false,
             },
       );
     };
-    (st as { render?: () => void }).render = render;
-    (st as { updateLabels?: () => void }).updateLabels = updateLabels;
-
-    const renderNow = () => (threeRef.current as unknown as { render: () => void }).render();
-    st.renderNow = renderNow;
+    const renderNow = () => st.render();
 
     const densityOf = () => (container.clientWidth || 1) >= 1024 ? 1 : 0.5;
     const stopLoop = () => {
@@ -355,6 +509,116 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         st.lifeRaf = 0;
       }
     };
+    const clearCamTimers = () => {
+      st.camTimers.forEach((t) => window.clearTimeout(t));
+      st.camTimers = [];
+    };
+    const clearGuard = () => {
+      if (st.guard !== null) {
+        window.clearTimeout(st.guard);
+        st.guard = null;
+      }
+    };
+
+    // ---- the user's trip: the character walks / rides the planned route and the camera follows at street level
+    /** Where the camera rests once a trip is over: the tour's focus café, else the origin. */
+    const overview = () => {
+      const focus = st.lastFocus ? sceneRef.current.towers.find((t) => t.id === st.lastFocus) : null;
+      return new THREE.Vector3(focus ? focus.x : 0, 0, focus ? focus.z : 0);
+    };
+    const easeBack = () => {
+      clearCamTimers();
+      st.camTimers.push(
+        window.setTimeout(() => {
+          st.camTimers = [];
+          st.follow = false;
+          const dest = overview();
+          if (st.reduced) {
+            st.target.copy(dest);
+            camera.zoom = 1;
+            renderNow();
+            return;
+          }
+          const from = st.target.clone();
+          const zoom0 = camera.zoom;
+          let k = 0;
+          const tick = () => {
+            k++;
+            st.target.lerpVectors(from, dest, k / EASE_BACK_STEPS);
+            camera.zoom = zoom0 + ((1 - zoom0) * k) / EASE_BACK_STEPS;
+            renderNow();
+            if (k < EASE_BACK_STEPS) st.camTimers.push(window.setTimeout(tick, EASE_BACK_MS));
+          };
+          tick();
+        }, ARRIVE_HOLD_MS),
+      );
+    };
+    const settle = (at: { x: number; z: number }) => {
+      const done = st.trip;
+      if (!done) return;
+      st.trip = null;
+      clearGuard();
+      st.pos = { x: at.x, z: at.z };
+      onTripRef.current?.(null);
+      onArriveRef.current?.(done.id);
+      if (st.follow) easeBack();
+      else renderNow();
+    };
+    const stepTrip = (dt: number) => {
+      if (!st.trip || !st.traveler) return;
+      const s = st.traveler.update(dt);
+      st.pos = { x: s.x, z: s.z };
+      if (st.follow) {
+        const k = 1 - Math.exp(-dt * FOLLOW_RATE);
+        st.target.x += (s.x - st.target.x) * k;
+        st.target.z += (s.z - st.target.z) * k;
+        camera.zoom += (st.followZ - camera.zoom) * (1 - Math.exp(-dt * FOLLOW_ZOOM_RATE));
+      }
+      if (s.done) settle(s);
+    };
+    st.startTrip = (to) => {
+      if (!st.traveler) return;
+      clearCamTimers();
+      clearGuard();
+      const door: P = { x: to.x + CAFE_STEP, z: to.z + CAFE_STEP };
+      const trip = tripFor(st.graph ?? EMPTY_GRAPH, st.pos, door, modeRef.current);
+      if (trip.lengthM < ARRIVED_M) {
+        st.trip = null;
+        st.traveler.place(door.x, door.z);
+        st.pos = door;
+        onTripRef.current?.(null);
+        onArriveRef.current?.(to.id);
+        renderNow();
+        return;
+      }
+      st.tripMode = modeRef.current;
+      const info: TripInfo = { id: to.id, mode: trip.mode, lengthM: trip.lengthM, durationSec: trip.durationSec };
+      st.trip = info;
+      onTripRef.current?.(info);
+      st.traveler.start(trip);
+      if (st.reduced) {
+        st.follow = false;
+        settle(st.traveler.finish());
+        return;
+      }
+      st.follow = true;
+      st.followZ = followZoom(st.fitHalf);
+      // A hidden tab or an off-screen map pauses the frame loop: finish the trip anyway so callers are never left waiting.
+      st.guard = window.setTimeout(() => {
+        st.guard = null;
+        if (st.trip?.id === info.id && st.traveler) settle(st.traveler.finish());
+      }, (trip.durationSec + 2) * 1000);
+      startLoop();
+    };
+    st.cancelTrip = () => {
+      if (!st.trip || !st.traveler) return;
+      clearGuard();
+      st.trip = null;
+      st.traveler.place(st.pos.x, st.pos.z);
+      onTripRef.current?.(null);
+      if (st.follow) easeBack();
+    };
+
     const setupLife = () => {
       if (st.reduced) return;
       const bucket = densityOf();
@@ -363,7 +627,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         st.life.dispose();
         st.life = null;
       }
-      stopLoop();
+      if (!st.trip) stopLoop();
       st.densityBucket = bucket;
       st.lifeStreets = st.streets;
       if (!threeRef.current) return;
@@ -379,12 +643,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       if (st.visible && !document.hidden) startLoop();
     };
     const startLoop = () => {
-      if (st.reduced || !st.life || st.lifeRaf || !st.visible || document.hidden) return;
+      if (st.reduced || (!st.life && !st.trip) || st.lifeRaf || !st.visible || document.hidden) return;
       st.lastT = performance.now();
       let frames = 0;
       let ema = 60;
       const loop = (now: number) => {
-        if (!threeRef.current || !st.life) {
+        if (!threeRef.current || (!st.life && !st.trip)) {
           st.lifeRaf = 0;
           return;
         }
@@ -394,14 +658,21 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         if (dt > 0) ema = ema * 0.95 + (1 / dt) * 0.05;
         frames++;
         if (frames % 60 === 0) container.dataset.fps = String(Math.round(ema));
-        st.life.update(dt);
+        st.life?.update(dt);
+        stepTrip(dt);
         render();
       };
       st.lifeRaf = requestAnimationFrame(loop);
     };
-    (st as { setupLife?: () => void }).setupLife = () => void setupLife();
+    st.setupLife = setupLife;
 
+    /** The user took the camera: stop following and do not ease back over their view. */
+    const takeCamera = () => {
+      st.follow = false;
+      clearCamTimers();
+    };
     const onPointerDown = (e: PointerEvent) => {
+      takeCamera();
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (st.pointers.size === 2) {
         const [a, b] = [...st.pointers.values()];
@@ -420,7 +691,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         const [a, b] = [...st.pointers.values()];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         if (st.pinchDist && st.pinchDist > 0) {
-          camera.zoom = Math.min(2.6, Math.max(0.55, camera.zoom * (dist / st.pinchDist)));
+          camera.zoom = clampZoom(camera.zoom * (dist / st.pinchDist));
         }
         st.pinchDist = dist;
         renderNow();
@@ -435,8 +706,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       up.normalize();
       st.target.addScaledVector(right, -dx * wpp);
       st.target.addScaledVector(up, dy * wpp);
-      st.target.x = Math.min(st.fitHalf, Math.max(-st.fitHalf, st.target.x));
-      st.target.z = Math.min(st.fitHalf, Math.max(-st.fitHalf, st.target.z));
+      st.target.x = Math.min(st.panLimit, Math.max(-st.panLimit, st.target.x));
+      st.target.z = Math.min(st.panLimit, Math.max(-st.panLimit, st.target.z));
       renderNow();
     };
     const onPointerUp = (e: PointerEvent) => {
@@ -445,7 +716,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      camera.zoom = Math.min(2.6, Math.max(0.55, camera.zoom * Math.exp(-e.deltaY * 0.001)));
+      takeCamera();
+      camera.zoom = clampZoom(camera.zoom * Math.exp(-e.deltaY * 0.001));
       renderNow();
     };
     const canvas = renderer.domElement;
@@ -487,8 +759,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       canvas.removeEventListener("wheel", onWheel);
       const stNow = threeRef.current;
       if (stNow) {
-        if (stNow.scanTimer !== null) window.clearInterval(stNow.scanTimer);
         stNow.stepTimers.forEach((t) => window.clearTimeout(t));
+        clearCamTimers();
+        clearGuard();
+        stNow.trip = null;
+        stNow.traveler?.dispose();
+        stNow.traveler = null;
         if (stNow.life) {
           stNow.life.dispose();
           stNow.life = null;
@@ -513,6 +789,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
   useEffect(() => {
     const st = threeRef.current;
     if (!st) return;
+    // The street graph is built once per area; the procedural town builds its own from its plan.
+    st.graph = geo ? buildGraph(polylinesFromSnapshot(geo)) : null;
     if (!geo) {
       st.realTown = null;
       return;
@@ -531,18 +809,19 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
   useEffect(() => {
     const st = threeRef.current;
     if (!st) return;
-    const renderNow = () => (threeRef.current as unknown as { render: () => void }).render();
+    const renderNow = () => st.render();
     const { palette, world } = st;
 
-    const fit = fitScene(scene);
-    const fitKey = fit.halfSize.toFixed(2);
+    // Re-frame (overview, centred on home) whenever this week's set of cafes changes; a verdict never moves the camera.
+    const framed = scene.towers.filter((t) => t.live !== false);
+    const fitKey = `${fitScene(scene).halfSize.toFixed(2)}:${framed.map((t) => t.id).join(",")}`;
+    st.panLimit = Math.max(fitAllScene(scene).halfSize, 12);
     if (fitKey !== st.fitKey) {
       st.fitKey = fitKey;
-      st.fitHalf = fit.halfSize;
       st.camera.zoom = 1;
       st.target.set(0, 0, 0);
-      st.applyFit();
     }
+    st.applyFit();
 
     // Clear the previous turn's stepped timers first, so the focus move started below is not cancelled mid-way.
     st.stepTimers.forEach((t) => window.clearTimeout(t));
@@ -580,18 +859,11 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         }
       });
     }
-    if (st.scanTimer !== null) {
-      window.clearInterval(st.scanTimer);
-      st.scanTimer = null;
-    }
-    st.scan = null;
-
     const content = new THREE.Group();
     st.content = content;
     st.tops = new Map();
     st.bases = new Map();
 
-    const ringRadii = scene.rings.map((r) => r.radiusUnits);
     const counts = scene.towers.map((t) => towerVoxels(t, palette).count);
     if (st.proc) {
       st.root.remove(st.proc);
@@ -612,7 +884,9 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         clear: counts[i] <= 3 ? 7.5 : counts[i] <= 5 ? 6 : 4.5,
         cap: Math.max(0.8, counts[i] - 1),
       }));
-      st.realTown.update(spots, ringRadii);
+      // The home house stands in a cleared plaza; its neighbours keep their heights.
+      spots.push({ x: 0, z: 0, clear: HOME_CLEAR, cap: Infinity });
+      st.realTown.update(spots);
     } else {
       const cafes: TownCafe[] = scene.towers.map((t, i) => ({
         x: t.x,
@@ -620,8 +894,9 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         clear: counts[i] <= 3 ? 7.5 : counts[i] <= 5 ? 6 : 4.5,
         cap: Math.min(6, Math.max(2, counts[i])),
       }));
-      const townPlan = planTown({ seed: seedFromString(scene.home.label), half: 90, cafes, ringRadii });
+      const townPlan = planTown({ seed: seedFromString(scene.home.label), half: 90, cafes });
       st.streets = townPlan.streets;
+      if (!st.graph) st.graph = buildGraph(streetPolylines(townPlan.streets));
       st.proc = buildTown(townPlan, townPalette(world), cafes).group;
       st.root.add(st.proc);
     }
@@ -683,12 +958,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         const counts = new Map<string, number>();
         for (const [id, spec] of targets) {
           const a = from.get(id) ?? 0;
-          counts.set(id, Math.round(a + ((spec.count - a) * step) / 3));
+          counts.set(id, Math.round(a + ((spec.count - a) * step) / RISE_STEPS));
         }
         paintTowers(counts);
         renderNow();
-        if (step < 3) {
-          st.stepTimers.push(window.setTimeout(tick, 100));
+        if (step < RISE_STEPS) {
+          st.stepTimers.push(window.setTimeout(tick, RISE_MS));
         } else {
           st.prevCounts = finalCounts;
         }
@@ -737,59 +1012,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       content.add(mesh);
     }
 
-    const currentRing = scene.rings.find((r) => r.current) ?? scene.rings[0];
-    for (const ring of scene.rings) {
-      const count = Math.max(24, Math.floor((2 * Math.PI * ring.radiusUnits) / 2.2));
-      const mesh = boxMesh(count, ring.current ? palette.accent : palette.line);
-      mesh.userData.layer = "rings";
-      let i = 0;
-      for (let s = 0; s < count; s++) {
-        if (s % 3 === 2) continue;
-        const a = (s / count) * Math.PI * 2;
-        place(
-          mesh, i,
-          Math.cos(a) * ring.radiusUnits, 1.15, Math.sin(a) * ring.radiusUnits,
-          1.2, 0.25, 1.2,
-          ring.current ? palette.accent : palette.line,
-        );
-        i++;
-      }
-      mesh.count = i;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      content.add(mesh);
-    }
-
-    if (currentRing && loading && !st.reduced) {
-      const scan = boxMesh(7, palette.accent2);
-      scan.userData.layer = "scan";
-      st.scan = scan;
-      content.add(scan);
-      const drawScan = () => {
-        if (!st.scan) return;
-        for (let s = 0; s < 7; s++) {
-          const a = st.scanAngle + ((s - 3) * 2.4 * Math.PI) / 180;
-          place(
-            st.scan, s,
-            Math.cos(a) * currentRing.radiusUnits, 1.15, Math.sin(a) * currentRing.radiusUnits,
-            1.7, 0.35, 1.7,
-            palette.accent2,
-          );
-        }
-        st.scan.instanceMatrix.needsUpdate = true;
-        if (st.scan.instanceColor) st.scan.instanceColor.needsUpdate = true;
-        st.scanAngle += (14 * Math.PI) / 180;
-        renderNow();
-      };
-      drawScan();
-      st.scanTimer = window.setInterval(drawScan, 140);
-    }
-
     if (st.realTown && scene.towers.length > 0) {
-      const lots = boxMesh(scene.towers.length + 1, world.sidewalk);
+      const lots = boxMesh(scene.towers.length + 2, world.sidewalk);
       lots.userData.layer = "lots";
       scene.towers.forEach((t, i) => place(lots, i, t.x, LOT_Y / 2, t.z, 3.4, LOT_Y, 3.4, world.sidewalk));
       place(lots, scene.towers.length, scene.home.x, LOT_Y / 2, scene.home.z, 3.4, LOT_Y, 3.4, world.sidewalk);
+      place(lots, scene.towers.length + 1, 0, LOT_Y / 2, 0, HOME_PAD, LOT_Y, HOME_PAD, world.sidewalk);
       lots.instanceMatrix.needsUpdate = true;
       if (lots.instanceColor) lots.instanceColor.needsUpdate = true;
       content.add(lots);
@@ -804,6 +1032,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     homeMesh.instanceMatrix.needsUpdate = true;
     if (homeMesh.instanceColor) homeMesh.instanceColor.needsUpdate = true;
     content.add(homeMesh);
+    content.add(houseMesh(world));
 
     st.root.add(content);
     if (st.life) {
@@ -811,8 +1040,42 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     }
     renderNow();
     onReadyRef.current?.();
-    ((st as unknown as { setupLife?: () => void }).setupLife ?? (() => {}))();
-  }, [scene, loading, geo, focusId]);
+    st.setupLife();
+  }, [scene, geo, focusId]);
+
+  // Send the character to a café: a change to a new id starts a trip, null cancels the one under way.
+  useEffect(() => {
+    const st = threeRef.current;
+    if (!st) return;
+    if (!travelTo) {
+      st.travelKey = null;
+      st.cancelTrip();
+      return;
+    }
+    if (travelTo === st.travelKey) return;
+    const tower = scene.towers.find((t) => t.id === travelTo);
+    if (!tower) return;
+    st.travelKey = travelTo;
+    st.startTrip(tower);
+  }, [travelTo, scene]);
+
+  // Switching mode mid-trip re-plans from where the character is now.
+  useEffect(() => {
+    const st = threeRef.current;
+    const id = st?.trip?.id;
+    if (!st || !id || st.tripMode === travelMode) return;
+    const tower = sceneRef.current.towers.find((t) => t.id === id);
+    if (tower) st.startTrip(tower);
+  }, [travelMode]);
+
+  // A floating bar's height keeps labels clear of it.
+  useEffect(() => {
+    const st = threeRef.current;
+    if (!st) return;
+    st.readInset();
+    st.labelKey = "";
+    st.renderNow();
+  }, [insetTop]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
@@ -832,6 +1095,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       </div>
       {labels.map((label) => {
         const open = label.id === selectedId || label.id === hoverId || label.id === focusId;
+        // While the camera follows the character, tags of towers out of view stay out of the way.
+        if (label.hide && !open) return null;
         if (!open) {
           return (
             <button
