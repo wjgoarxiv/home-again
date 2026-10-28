@@ -4,34 +4,26 @@ const WEEKS = [
   { week: 3, radius: 500, label: "Settle" },
 ] as const;
 
-/** Three rings that shrink with the search radius; the current week's ring is drawn in teal. */
+/** Three ruled cells; the current week's cell is the inverse bar, and its radius shows the widened value when used. */
 export function WeekStepper({ week, wide }: { week: 1 | 2 | 3; wide?: boolean }) {
   return (
-    <div className="flex items-center gap-4" data-ui-moment="data-moment">
-      <svg viewBox="0 0 120 120" className="h-20 w-20 shrink-0" aria-hidden="true">
-        {WEEKS.map((w) => (
-          <circle
+    <ol className="grid grid-cols-3 border-2 border-line-strong" aria-label="Weeks">
+      {WEEKS.map((w) => {
+        const now = w.week === week;
+        return (
+          <li
             key={w.week}
-            cx="60"
-            cy="60"
-            r={(w.radius / 1000) * 54}
-            fill={w.week === week ? "var(--teal-soft)" : "none"}
-            stroke={w.week === week ? "var(--teal)" : "var(--muted)"}
-            strokeOpacity={w.week === week ? 1 : 0.45}
-            strokeWidth={w.week === week ? 2.5 : 1.5}
-            strokeDasharray={w.week > week ? "3 4" : undefined}
-          />
-        ))}
-        <circle cx="60" cy="60" r="4" fill="var(--coral)" />
-      </svg>
-      <ol className="flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Weeks">
-        {WEEKS.map((w) => (
-          <li key={w.week} aria-current={w.week === week ? "step" : undefined} className={w.week === week ? "font-semibold text-teal" : "text-muted"}>
-            Week {w.week} · {w.label}
-            <span className="block text-xs font-normal text-muted">{w.week === week && wide ? "1500 m (widened)" : `${w.radius} m`}</span>
+            aria-current={now ? "step" : undefined}
+            className="border-line-strong px-3 py-2 not-last:border-r-2"
+            style={now ? { background: "var(--c-ink)", color: "var(--c-canvas)" } : undefined}
+          >
+            <span className="ui-coord block" style={now ? { color: "var(--c-canvas)" } : undefined}>
+              wk {w.week} · {w.label}
+            </span>
+            <span className="ui-num block font-bold">{now && wide ? "1500 m" : `${w.radius} m`}</span>
           </li>
-        ))}
-      </ol>
-    </div>
+        );
+      })}
+    </ol>
   );
 }
