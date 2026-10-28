@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { Card } from "@/lib/schema";
+import { panelSummary } from "@/lib/panelSummary";
 
 export type Trace = {
   endpoint: string;
@@ -44,7 +45,7 @@ export function QlooPanel({
   open: boolean;
   onToggle: () => void;
 }) {
-  const summary = loading ? "asking Qloo…" : `${cards.length} ${cards.length === 1 ? "café" : "cafés"} · ${trace?.radiusM ?? radiusM} m`;
+  const summary = panelSummary({ loading, shown: cards.length, trace, radiusM });
   return (
     <section
       className="ui-panel flex max-h-full min-h-0 flex-col"
