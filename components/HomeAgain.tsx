@@ -9,7 +9,32 @@ import { RegularFound } from "./RegularFound";
 import { SeedForm } from "./SeedForm";
 import { WeekStepper } from "./WeekStepper";
 
-type TurnReply = { state?: JourneyState; cards?: Card[]; notice?: string | null; widenOffer?: boolean; trace?: Trace };
+const WEEK_RADII = [1000, 700, 500] as const;
+
+/** The journey's one hard rule as a chart: the Qloo search circle tightens every week. */
+function RadiusChart() {
+  return (
+    <figure className="ui-panel" data-ui-moment="chart">
+      <figcaption className="ui-label mb-3">Qloo search radius by week</figcaption>
+      <svg className="ui-chart block w-full" viewBox="0 0 300 84" role="img" aria-label="Week 1: 1000 m, week 2: 700 m, week 3: 500 m">
+        {WEEK_RADII.map((r, i) => (
+          <g key={r} transform={`translate(0 ${i * 28})`}>
+            <text x="0" y="16" fontSize="11" fill="var(--c-ink-3)" fontFamily="var(--font-mono)">
+              WK {i + 1}
+            </text>
+            <rect x="44" y="4" width="200" height="16" fill="none" stroke="var(--c-line-strong)" />
+            <rect x="44" y="4" width={r / 5} height="16" fill={i === 0 ? "var(--c-accent)" : "var(--c-accent-2)"} />
+            <text x="300" y="16" fontSize="11" textAnchor="end" fill="var(--c-ink)" fontFamily="var(--font-mono)">
+              {r} m
+            </text>
+          </g>
+        ))}
+      </svg>
+    </figure>
+  );
+}
+
+type TurnReply ={ state?: JourneyState; cards?: Card[]; notice?: string | null; widenOffer?: boolean; trace?: Trace };
 
 export function HomeAgain() {
   const [journey, setJourney] = useState<JourneyState | null>(null);
@@ -77,18 +102,17 @@ export function HomeAgain() {
 
   return (
     <div className="min-h-dvh">
-      <header className="ui-topbar">
+      <header className="ui-topbar" style={{ background: "var(--c-canvas)" }}>
         <span className="ui-brand">HOME, AGAIN</span>
-        <span className="ui-coord">qloo agentic hackathon 2026 · taste-affine café finder</span>
+        <span className="ui-coord">qloo hackathon 2026</span>
       </header>
 
       {!journey && (
         <main className="mx-auto grid w-full max-w-6xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <section className="ui-stack">
-            <p className="ui-label">moved cities?</p>
+          <section className="ui-stack bg-canvas">
             <h1 className="ui-display">Home, again</h1>
             <p className="ui-lead">
-              Name the café you used to call yours. Qloo maps your new neighbourhood by taste, and over three short weeks your answers narrow it to one place that feels like home.
+              Moved cities? Name the café you used to call yours. Qloo maps your new neighbourhood by taste, and over three short weeks your answers narrow it to one place that feels like home.
             </p>
             <ol className="ui-stack ui-stack--tight ui-small">
               <li>
@@ -101,6 +125,7 @@ export function HomeAgain() {
                 <span className="ui-coord">03</span> Love one twice and it is your new regular.
               </li>
             </ol>
+            <RadiusChart />
           </section>
           <SeedForm onStart={start} busy={busy} />
         </main>
@@ -174,7 +199,7 @@ export function HomeAgain() {
         </p>
       )}
 
-      <footer className="border-t-2 border-line-strong px-4 py-6 sm:px-6">
+      <footer className="border-t-2 border-line-strong bg-canvas px-4 py-6 sm:px-6">
         <p className="ui-meta">Taste data, photos and opening hours from Qloo. Seating and how busy a café is right now are not verified.</p>
       </footer>
     </div>
