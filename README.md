@@ -23,11 +23,16 @@
 
 Built for the Qloo Agentic Hackathon 2026.
 
+<p align="center"><img src="docs/screen-world.png" alt="The app mid-journey: a voxel East Village where each suggested café is a tower whose height is its Qloo affinity, beside the live Qloo request panel" width="830"></p>
+
+**Short on time?** Open the [live demo](https://home-again-gamma.vercel.app) and press **▶ Watch it play**. It runs a whole three-week journey on real Qloo data in under a minute and narrates each request.
+
 ## ☕ How it works
 
-1. Name the café you used to go to, or press the example (Fritz Coffee Company Dohwa, Seoul → East Village, New York).
-2. Each week you get up to three cafés. A card shows the walking distance, the taste signals the café shares with your old one on Qloo, and what is still unverified, such as hours or seating.
-3. Tell it how each one went:
+1. Pick an old café from the gallery (Fritz Coffee Company Dohwa or Anthracite Yeonhui in Seoul, Blue Bottle Coffee in San Francisco), or type your own, and choose a New York neighbourhood.
+2. Your new neighbourhood appears as a voxel city. Each café Qloo suggests stands as a tower: its height is the Qloo affinity with your old café, its top colour the kind of taste you share (drinks, ambience, decor, menu), and the dashed ring is this week's search radius.
+3. Beside it, the Qloo panel shows the request that produced the towers: the location and radius, the taste signal (your old café plus every café you loved), what was excluded and why, and how many cafés came back.
+4. Each card adds Qloo's photo, today's opening hours, price level and a short description to the shared taste tags. Tell it how each one went:
 
 | You press | What changes next week |
 | --- | --- |
@@ -35,8 +40,10 @@ Built for the Qloo Agentic Hackathon 2026.
 | Too crowded | The café sits out one week; the taste signal stays |
 | Not for me | The café is gone for good |
 
-4. The search circle tightens every week: 1000 m, then 700 m, then 500 m. If a round comes up empty, the app offers to look 1500 m out.
-5. Love the same café twice and it becomes **your new regular**. Three weeks is the whole journey.
+5. The city answers at once: a loved tower turns amber and a beam links it to your old café, a crowded one greys out for a week, a rejected one drops to a stub. The search circle tightens every week (1000 m, 700 m, 500 m); if a round comes up empty, the app offers to look 1500 m out.
+6. Love the same café twice and it becomes **your new regular**. Three weeks is the whole journey.
+
+Without WebGL, or with reduced motion turned on, the same city is drawn as a flat top-down map.
 
 ## 🧭 Why Qloo
 
@@ -108,7 +115,7 @@ Checks: `pnpm test`, `pnpm typecheck`, `pnpm build`.
 ## 🧱 Limits
 
 - The neighbourhood presets are East Village, Williamsburg and West Village in New York. Qloo's café coverage is thinner outside large US cities.
-- Each card marks opening hours, seating and how busy the café is right now as unverified.
+- Opening hours come from Qloo and are read in New York time; seating and how busy a café is right now stay unverified on each card.
 - Without Upstash, the per-session and daily caps are counted separately on each server instance.
 - A session is an anonymous cookie, so clearing cookies starts a fresh session budget. The daily cap is the hard limit.
 

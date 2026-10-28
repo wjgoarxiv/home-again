@@ -10,7 +10,9 @@ Moving cities means losing your regular café. Map apps can list every café nea
 
 ## What it does
 
-Home, again starts from the café you used to love and your new neighbourhood. Over three compressed weeks it suggests up to three cafés at a time. Each card shows the distance, the taste signals the café shares with your old one on Qloo, and what is still unverified. You answer Loved it, Too crowded or Not for me, and the next week's search changes: loved cafés join the taste signal, crowded ones sit out a week, rejected ones are gone, and the radius tightens from 1000 m to 500 m. Love the same café twice and it becomes your new regular.
+Home, again starts from the café you used to love and your new neighbourhood. Your new neighbourhood appears as a voxel city: every café Qloo suggests is a tower whose height is its Qloo affinity with your old café, coloured by the kind of taste you share. Beside the city, a live panel shows the exact Qloo request behind it: radius, taste signal, exclusions and why. Cards add Qloo's photo, today's hours, price and description to the shared taste tags.
+
+Over three compressed weeks you answer Loved it, Too crowded or Not for me, and both the city and the next Qloo request change: loved cafés turn amber, get a beam back to your old café and join the taste signal; crowded ones grey out for a week; rejected ones drop to a stub; the radius tightens from 1000 m to 500 m. Love the same café twice and it becomes your new regular. One button, Watch it play, runs the whole journey on real data in under a minute for anyone short on time.
 
 ## How we built it
 
@@ -18,6 +20,8 @@ Home, again starts from the café you used to love and your new neighbourhood. O
 - Qloo `/search` resolves your old café; Qloo `/v2/insights` with café genre filters, a location radius, taste signals and exclusions produces every candidate and its affinity.
 - A Claude Haiku agent calls `find_candidates`, then `submit_cards`. Code validates each card: the id must come from Qloo's candidates, and every taste tag must be one both cafés carry on Qloo. Crowd, age and payment tags never reach a card, and "people who…" claims are rejected. Two failed answers fall back to Qloo's top three by affinity.
 - Qloo responses are cached for 24 hours; calls are capped per session and per day.
+- The city is three.js: one instanced street grid, stacked voxel towers placed by each café's Qloo coordinates, rendered only when something changes. The interface follows a locked computational-brutalism kit and passes an automated probe at 320–1440 px, dark mode, reduced motion and 200 % zoom.
+- The UI was built in parallel lanes (world, guided run, seed gallery) on separate git worktrees and merged behind tests (113 Vitest tests).
 
 ## Challenges
 
@@ -31,5 +35,5 @@ Letting Qloo own the candidates and evidence, and letting the model only choose 
 ## What's next
 
 - More neighbourhoods and free-text locations.
-- Opening hours from Qloo's place properties instead of marking them unverified.
+- Seating and live busyness, which Qloo does not carry today.
 - A taste-bridge view that draws old café → shared tags → new regular.
