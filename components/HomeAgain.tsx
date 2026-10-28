@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { EXAMPLE } from "@/lib/areas";
 import { startJourney, radiusForWeek } from "@/lib/journey";
+import { AutoplayBar, useAutoplay } from "./Autoplay";
 import type { Area, Card, JourneyState, Seed, Verdict } from "@/lib/schema";
 import { CafeCard } from "./CafeCard";
 import { QlooPanel, type Trace } from "./QlooPanel";
@@ -98,6 +100,31 @@ export function HomeAgain() {
   }
 
   const feedback = Object.entries(verdicts).map(([id, verdict]) => ({ id, verdict }));
+
+  async function startExample() {
+    try {
+      const res = await fetch("/api/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: EXAMPLE.name, city: EXAMPLE.city }) });
+      const body = (await res.json()) as { matches?: Seed[]; notice?: string };
+      const seed = body.matches?.[0];
+      if (seed) start({ ...seed, city: EXAMPLE.city }, EXAMPLE.area);
+      else setNotice(body.notice ?? "Could not find the example café on Qloo.");
+    } catch {
+      setNotice("Could not reach the server. Check your connection and try again.");
+    }
+  }
+
+  const autoplay = useAutoplay({
+    journey,
+    cards,
+    trace,
+    busy,
+    done: Boolean(journey?.done),
+    startExample,
+    setVerdicts,
+    submit: () => {
+      if (journey) turn(journey, Object.entries(verdicts).map(([id, verdict]) => ({ id, verdict })));
+    },
+  });
   const radiusM = wide ? 1500 : journey ? radiusForWeek(journey.week) : 1000;
 
   return (
@@ -106,6 +133,9 @@ export function HomeAgain() {
         <span className="ui-brand">HOME, AGAIN</span>
         <span className="ui-coord">qloo hackathon 2026</span>
       </header>
+      <div className="px-4 pt-4 sm:px-6">
+        <AutoplayBar {...autoplay} />
+      </div>
 
       {!journey && (
         <main className="mx-auto grid w-full max-w-6xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
