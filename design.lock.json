@@ -1,17 +1,17 @@
 {
   "schema_id": "litfamily.design-lock/v1",
-  "style": "home-again-pastel",
+  "style": "home-again-friendly",
   "family": "workspace",
   "density": "rich",
   "fonts": [
-    "JetBrains Mono",
-    "Pretendard"
+    "Pretendard",
+    "JetBrains Mono"
   ],
   "type": {
     "scale_px": [
-      12,
       13,
       14,
+      15,
       16,
       18,
       20,
@@ -21,15 +21,19 @@
       48
     ],
     "display_px": {
-      "min": 40,
-      "max": 88
+      "min": 36,
+      "max": 64
     },
     "moment_px": {
-      "max": 168
+      "max": 96
     }
   },
   "radius_px": [
-    0
+    0,
+    6,
+    8,
+    12,
+    999
   ],
   "space_px": [
     4,
@@ -51,35 +55,35 @@
       "canvas": "#fbf7ef",
       "surface": "#fffdf8",
       "sunken": "#f2ebdc",
-      "ink": "#1f2233",
-      "ink-2": "#394058",
-      "ink-3": "#565d75",
-      "line": "#e3d9c3",
-      "line-strong": "#4a4f6b",
-      "control": "#767c95",
+      "ink": "#161826",
+      "ink-2": "#2f3550",
+      "ink-3": "#454b66",
+      "line": "#c4b696",
+      "line-strong": "#40455f",
+      "control": "#565c78",
       "accent": "#ff7a59",
-      "accent-hover": "#ff6a45",
-      "on-accent": "#1f2233",
+      "accent-hover": "#ff8a6c",
+      "on-accent": "#0f111c",
       "accent-wash": "#ffe4da",
-      "accent-ink": "#b0361a",
+      "accent-ink": "#9a2c12",
       "accent-2": "#3b69d4",
-      "accent-2-ink": "#2c52ae",
+      "accent-2-ink": "#244596",
       "accent-2-wash": "#dfe9ff",
       "on-accent-2": "#ffffff",
       "support": "#cdeedb",
-      "support-ink": "#1b5b3c",
-      "focus": "#d9431f",
-      "positive": "#1d7a4a",
+      "support-ink": "#134a30",
+      "focus": "#1d4aa8",
+      "positive": "#14633a",
       "positive-wash": "#d6f3e2",
-      "warning": "#7a5200",
+      "warning": "#6b4600",
       "warning-wash": "#fff0bf",
-      "negative": "#b3261e",
+      "negative": "#9c1f19",
       "negative-wash": "#ffdcd7",
-      "info": "#2a5ca6",
+      "info": "#23508f",
       "info-wash": "#dcebfd",
-      "chart-1": "#1f2233",
+      "chart-1": "#161826",
       "chart-2": "#ff7a59",
-      "chart-3": "#767c95",
+      "chart-3": "#565c78",
       "chart-4": "#d7ceb8",
       "chart-5": "#3fae7a"
     },
@@ -126,7 +130,7 @@
     "components": "ui/components.css",
     "script": "ui/ui.js"
   },
-  "accent_art": "instrument",
+  "accent_art": "none",
   "moment": {
     "scale": "small",
     "kind": "chart",
