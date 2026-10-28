@@ -23,14 +23,14 @@
 
 Built for the Qloo Agentic Hackathon 2026.
 
-<p align="center"><img src="docs/screen-world.png" alt="The app after Watch a 1-minute demo: an East Village map with real building footprints, streets and traffic, where each suggested café is a tower whose height is its Qloo affinity, beside the live Qloo request panel" width="830"></p>
+<p align="center"><img src="docs/screen-world.png" alt="The end of the 1-minute demo on the live site: the East Village drawn from NYC Open Data, the loved café standing as a coral tower, the Qloo panel showing week 2's taste signal and exclusions, and the your-new-regular card with its shared Qloo taste tags" width="830"></p>
 
-**Short on time?** Open the [live demo](https://home-again-gamma.vercel.app) and press **▶ Watch a 1-minute demo**. It runs a whole three-week journey on real Qloo data in under a minute and narrates each request.
+**Short on time?** Open the [live demo](https://home-again-gamma.vercel.app) and press **▶ Watch a 1-minute demo**. It runs a whole three-week journey on real Qloo data in under a minute: the camera moves to each step, a caption explains it, and you can pause, skip or mute.
 
 ## ☕ How it works
 
 1. Pick an old café from the gallery (Fritz Coffee Company Dohwa or Anthracite Yeonhui in Seoul, Blue Bottle Coffee in San Francisco), or type your own, and choose a New York neighbourhood.
-2. Your new neighbourhood appears as a 3D map of the real streets and buildings. Each café Qloo suggests stands as a tower: its height is the Qloo affinity with your old café, its top colour the kind of taste you share (drinks, ambience, decor, menu).
+2. Your new neighbourhood appears as a 3D map of its real streets and buildings, drawn from NYC Open Data building footprints and street centerlines stored with the app (no map key). Each café Qloo suggests stands as a tower: its height is the Qloo affinity with your old café, its top colour the kind of taste you share (drinks, ambience, decor, menu).
 3. Beside it, the Qloo panel shows the request that produced the towers: the location and radius, the taste signal (your old café plus every café you loved), what was excluded and why, and how many cafés came back.
 4. Each card adds Qloo's photo, today's opening hours, price level and a short description to the shared taste tags. Tell it how each one went:
 
@@ -40,8 +40,9 @@ Built for the Qloo Agentic Hackathon 2026.
 | Too crowded | The café sits out one week; the taste signal stays |
 | Not for me | The café is gone for good |
 
-5. The city answers at once: a loved tower turns amber and a beam links it to your old café, a crowded one greys out for a week, a rejected one drops to a stub. The search circle tightens every week (1000 m, 700 m, 500 m); if a round comes up empty, the app offers to look 1500 m out.
-6. Love the same café twice and it becomes **your new regular**. Three weeks is the whole journey.
+5. Tap a tower and your character goes there along the real streets: on foot for short hops, by taxi further out, or by the Walk, Taxi or Bus you pick on the card.
+6. The city answers each verdict at once: a loved tower turns coral and a beam links it to your old café, a crowded one shrinks and greys out for a week, a rejected one drops to a stub. The search circle tightens every week (1000 m, 700 m, 500 m); if a round comes up empty, the app offers to look 1500 m out.
+7. Love the same café twice and it becomes **your new regular**. Three weeks is the whole journey.
 
 Without WebGL, or with reduced motion turned on, the same city is drawn as a flat top-down map.
 
