@@ -26,6 +26,7 @@ describe("applyFeedback", () => {
     expect(excludedIds(s2)).toContain("b");
     const s3 = applyFeedback({ ...s2, shown: ["d"] }, []);
     expect(s3.crowded).toEqual([]);
+    expect(excludedIds(s3)).not.toContain("b");
   });
 
   it("excludes a rejected café permanently", () => {
@@ -76,5 +77,13 @@ describe("parseJourneyState", () => {
   it("rejects malformed state", () => {
     expect(() => parseJourneyState({ ...startJourney(seed, area), week: 9 })).toThrow();
     expect(() => parseJourneyState({ seed })).toThrow();
+  });
+
+  it("rejects oversized strings that would inflate the prompt or the Qloo URL", () => {
+    const fresh = startJourney(seed, area);
+    const long = "x".repeat(500);
+    expect(() => parseJourneyState({ ...fresh, seed: { ...seed, name: long } })).toThrow();
+    expect(() => parseJourneyState({ ...fresh, area: { ...area, name: long } })).toThrow();
+    expect(() => parseJourneyState({ ...fresh, rejected: [long] })).toThrow();
   });
 });

@@ -35,14 +35,16 @@ export function applyFeedback(state: JourneyState, feedback: Feedback): JourneyS
 
   const regular = Object.keys(loves).find((id) => loves[id] >= LOVES_FOR_REGULAR) ?? null;
   const lastWeek = state.week === 3;
+  const crowded = valid.filter((f) => f.verdict === "crowded").map((f) => f.id);
 
   return {
     ...state,
     week: regular || lastWeek ? state.week : ((state.week + 1) as JourneyState["week"]),
     liked: uniq([...state.liked, ...valid.filter((f) => f.verdict === "love").map((f) => f.id)]),
-    crowded: valid.filter((f) => f.verdict === "crowded").map((f) => f.id),
+    crowded,
     rejected: uniq([...state.rejected, ...valid.filter((f) => f.verdict === "meh").map((f) => f.id)]),
-    seen: uniq([...state.seen, ...state.shown]),
+    // a crowded café sits out one round only, so it must not join the permanent "seen" exclusion
+    seen: uniq([...state.seen, ...state.shown.filter((id) => !crowded.includes(id))]),
     shown: [],
     loves,
     regular,

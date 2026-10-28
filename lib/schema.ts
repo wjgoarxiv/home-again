@@ -1,18 +1,21 @@
 import { z } from "zod";
 
 export const SeedSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  city: z.string().optional(),
+  id: z.string().min(1).max(100),
+  name: z.string().min(1).max(120),
+  city: z.string().max(60).optional(),
+  /** Qloo tag names of the seed café, used to ground each card's taste link. */
+  tags: z.array(z.string().min(1).max(80)).max(200).optional(),
 });
 
 export const AreaSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(60),
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
 });
 
-const Ids = z.array(z.string().min(1)).max(50);
+const Id = z.string().min(1).max(100);
+const Ids = z.array(Id).max(50);
 
 export const JourneyStateSchema = z.object({
   seed: SeedSchema,
@@ -23,8 +26,8 @@ export const JourneyStateSchema = z.object({
   rejected: Ids,
   seen: Ids,
   shown: Ids,
-  loves: z.record(z.string(), z.number().int().min(0)),
-  regular: z.string().nullable(),
+  loves: z.record(Id, z.number().int().min(0)),
+  regular: Id.nullable(),
   done: z.boolean(),
 });
 
