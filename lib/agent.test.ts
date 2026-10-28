@@ -107,6 +107,23 @@ describe("runAgent", () => {
     expect(result.cards[0].distanceM).toBeGreaterThan(500);
   });
 
+  it("puts the revisit card first even when the model leaves it out", async () => {
+    const far = { id: "LOVED-1", name: "Loved Cafe", lat: 40.7322, lng: -73.9813, affinity: 0.7, tags: ["Espresso"] };
+    const week2 = { ...state, week: 2 as const, liked: ["LOVED-1"], seen: ["LOVED-1"], loves: { "LOVED-1": 1 }, saved: [far] };
+    const d = deps([
+      callFind(),
+      submit([
+        { entityId: "TEST-0001", tasteLink: ["Espresso"], unknowns: [], why: "Taste-affine on espresso." },
+        { entityId: "TEST-0002", tasteLink: ["Pastries"], unknowns: [], why: "Taste-affine on pastries." },
+        { entityId: "TEST-0003", tasteLink: [], unknowns: [], why: "Close and taste-affine." },
+      ]),
+    ]);
+    const result = await runAgent(week2, d);
+    expect(result.source).toBe("agent");
+    expect(result.cards.map((c) => c.entityId)).toEqual(["LOVED-1", "TEST-0001", "TEST-0002"]);
+    expect(result.cards[0]).toMatchObject({ revisit: true, tasteLink: ["Espresso"] });
+  });
+
   it("lets Qloo and limit errors through for the route to report", async () => {
     const d = deps([callFind()]);
     d.findCandidates.mockRejectedValueOnce(new QlooError("quota", "Qloo rate limit reached"));

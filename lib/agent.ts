@@ -86,6 +86,15 @@ export function fallbackCards(candidates: Candidate[], state: JourneyState): Car
   });
 }
 
+/** The second love is what makes a regular, so the loved café's card always leads, picked by the model or not. */
+function withRevisitCard(cards: Card[], candidates: Candidate[], state: JourneyState): Card[] {
+  const id = revisitId(state);
+  const c = id ? candidates.find((x) => x.id === id) : undefined;
+  if (!c || cards.some((card) => card.entityId === c.id)) return cards;
+  const why = `You loved it last week, and it is still taste-affine with ${state.seed.name} on Qloo.`.slice(0, 240);
+  return [toCard(c, state, { tasteLink: allowedTaste(c, state).slice(0, 4), unknowns: ["hours"], why }), ...cards].slice(0, 3);
+}
+
 function byAffinity(found: Candidate[]): Candidate[] {
   return [...found].sort((a, b) => (b.affinity ?? -1) - (a.affinity ?? -1)).slice(0, MAX_CANDIDATES);
 }
@@ -140,7 +149,7 @@ export async function runAgent(state: JourneyState, deps: AgentDeps, opts: { rad
           results.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(view) });
         } else if (call.name === "submit_cards" && candidates) {
           const checked = validateCards(call.input, candidates, state);
-          if (checked.ok) return { cards: checked.cards, source: "agent", notice: null, widenOffer: false, usage, candidates };
+          if (checked.ok) return { cards: withRevisitCard(checked.cards, candidates, state), source: "agent", notice: null, widenOffer: false, usage, candidates };
           if (++badSubmits > 1) return await fallback();
           results.push({ type: "tool_result", tool_use_id: call.id, is_error: true, content: checked.errors.join("\n") });
         } else {
