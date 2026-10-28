@@ -66,6 +66,22 @@ export function cafeStatus(id: string, state: JourneyState, verdicts: Record<str
   return "candidate";
 }
 
+export type Fit = { cx: number; cz: number; halfSize: number };
+
+/** Tight frame around the current ring plus the towers, with ~15% margin. */
+export function fitScene(scene: Scene): Fit {
+  const current = scene.rings.find((r) => r.current) ?? scene.rings[0];
+  const ringR = current ? current.radiusUnits : 0;
+  let axis = ringR;
+  for (const t of scene.towers) axis = Math.max(axis, Math.abs(t.x), Math.abs(t.z));
+  return { cx: 0, cz: 0, halfSize: axis * 1.15 };
+}
+
+export function compactLabel(name: string, distanceM: number): string {
+  const short = name.length > 18 ? `${name.slice(0, 18).trimEnd()}…` : name;
+  return `${short} · ${Math.round(distanceM)}M`;
+}
+
 export type Tower = {
   id: string;
   name: string;

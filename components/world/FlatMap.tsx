@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { compactLabel, fitScene } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
 
 export type FlatMapProps = {
@@ -8,8 +9,6 @@ export type FlatMapProps = {
   selectedId: string | null;
   onSelect: (id: string) => void;
 };
-
-const SPAN = 88;
 
 function roleFill(tower: Tower): string {
   if (tower.status === "loved" || tower.status === "revisit") return "var(--c-accent)";
@@ -31,6 +30,7 @@ function roleFill(tower: Tower): string {
 export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
+  const [hoverId, setHoverId] = useState<string | null>(null);
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
@@ -40,50 +40,45 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+  const fit = fitScene(scene);
+  const H = fit.halfSize;
   const side = Math.min(box.w, box.h);
   const ox = (box.w - side) / 2;
   const oy = (box.h - side) / 2;
-  const frac = (v: number) => ((v + SPAN) / (SPAN * 2)) * side;
+  const frac = (v: number) => ((v + H) / (H * 2)) * side;
   const pxx = (v: number) => ox + frac(v);
   const pxy = (v: number) => oy + frac(v);
-  const toUnit = (p: number, o: number) => ((p - o) / side) * (SPAN * 2) - SPAN;
-  const clampX = (x: number) => Math.min(Math.max(x, 110), Math.max(110, box.w - 110));
-  const clampY = (y: number, lo: number, hi: number) => Math.min(Math.max(y, lo), Math.max(hi, y));
-  type PlacedLabel = { id: string; ux: number; uy: number; left: number; top: number; link: boolean };
-  const placed: PlacedLabel[] = (() => {
-    if (side <= 0) return [];
-    const base = scene.towers.map((t) => ({
-      id: t.id,
-      ux: t.x,
-      uy: t.z,
-      left: clampX(pxx(t.x)),
-      top: clampY(pxy(t.z) + 16, 30, Math.max(30, box.h - 64)),
-      link: false,
-    }));
-    base.sort((a, b) => a.top - b.top);
-    let prevBottom = -Infinity;
-    for (const b of base) {
-      const home = clampY(pxy(b.uy) + 16, 30, Math.max(30, box.h - 64));
-      if (b.top < prevBottom + 4) b.top = Math.min(b.top + (prevBottom + 4 - b.top), Math.max(30, box.h - 64));
-      if (Math.abs(b.top - home) > 2) b.link = true;
-      prevBottom = Math.max(prevBottom, b.top + 44);
-    }
-    return base;
-  })();
-  const placedById = new Map(placed.map((p) => [p.id, p]));
+  const clampX = (x: number) => Math.min(Math.max(x, 24), Math.max(24, box.w - 24));
+  const clampY = (y: number) => Math.min(Math.max(y, 24), Math.max(24, box.h - 24));
+  const hx = side > 0 ? pxx(scene.home.x) : 0;
+  const hy = side > 0 ? pxy(scene.home.z) : 0;
+  const homeDocked = side > 0 && (hx < 0 || hx > box.w || hy < 0 || hy > box.h);
+  const homeStyle: CSSProperties = !homeDocked
+    ? {
+        left: clampX(hx),
+        top: clampY(hy),
+        transform: "translate(-50%, -130%)",
+      }
+    : {
+        ...(hx <= box.w / 2 ? { left: 8 } : { right: 8 }),
+        ...(hy <= box.h / 2 ? { top: 8 } : { bottom: 8 }),
+      };
+  const step = Math.max(4, Math.round(H / 9));
+  const grid: number[] = [];
+  for (let g = -Math.floor(H / step) * step; g <= H; g += step) grid.push(g);
   return (
     <div ref={boxRef} className="relative h-full w-full overflow-hidden" style={{ background: "var(--c-canvas)" }}>
       <svg
-        viewBox={`-${SPAN} -${SPAN} ${SPAN * 2} ${SPAN * 2}`}
+        viewBox={`-${H} -${H} ${H * 2} ${H * 2}`}
         className="absolute inset-0 h-full w-full"
         role="img"
         aria-label="Top-down plan of the taste neighbourhood"
       >
-        <rect x={-SPAN} y={-SPAN} width={SPAN * 2} height={SPAN * 2} fill="var(--c-sunken)" />
-        {Array.from({ length: 21 }, (_, i) => i * 8 - 80).map((g) => (
-          <g key={g} stroke="var(--c-line)" strokeWidth="0.4">
-            <line x1={g} y1={-SPAN} x2={g} y2={SPAN} />
-            <line x1={-SPAN} y1={g} x2={SPAN} y2={g} />
+        <rect x={-H} y={-H} width={H * 2} height={H * 2} fill="var(--c-sunken)" />
+        {grid.map((g) => (
+          <g key={g} stroke="var(--c-line)" strokeWidth={H / 160}>
+            <line x1={g} y1={-H} x2={g} y2={H} />
+            <line x1={-H} y1={g} x2={H} y2={g} />
           </g>
         ))}
         {scene.rings.map((ring) => (
@@ -94,8 +89,8 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
             r={ring.radiusUnits}
             fill="none"
             stroke={ring.current ? "var(--c-accent)" : "var(--c-line-strong)"}
-            strokeWidth={ring.current ? 2 : 1}
-            strokeDasharray="4 3"
+            strokeWidth={ring.current ? H / 28 : H / 60}
+            strokeDasharray={`${H / 22} ${H / 30}`}
           />
         ))}
         {scene.beams.map((beam) => {
@@ -109,57 +104,35 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
               x2={tower.x}
               y2={tower.z}
               stroke="var(--c-accent)"
-              strokeWidth="1.5"
+              strokeWidth={H / 45}
             />
           );
         })}
-        <line
-          x1={scene.home.x + 8}
-          y1={scene.home.z + 8}
-          x2={scene.home.x}
-          y2={scene.home.z}
-          stroke="var(--c-accent-2)"
-          strokeWidth="2"
-        />
         <polygon
           points={`${scene.home.x},${scene.home.z - 5} ${scene.home.x + 4},${scene.home.z + 2} ${scene.home.x - 4},${scene.home.z + 2}`}
           fill="var(--c-accent-2)"
         />
-        {side > 0 &&
-          placed
-            .filter((p) => p.link)
-            .map((p) => (
-              <line
-                key={`link-${p.id}`}
-                x1={p.ux}
-                y1={p.uy}
-                x2={toUnit(p.left, ox)}
-                y2={toUnit(p.top, oy)}
-                stroke="var(--c-line-strong)"
-                strokeWidth="1"
-              />
-            ))}
         {scene.towers.map((tower) => {
-          const side = tower.status === "rejected" ? 2 : 2 + tower.height * 0.9;
+          const sq = tower.status === "rejected" ? H / 30 : H / 45 + tower.height * (H / 110);
           const dimmed = tower.status === "seen";
           const selected = tower.id === selectedId;
           return (
             <g key={tower.id} opacity={dimmed ? 0.45 : 1}>
               <rect
-                x={tower.x - side / 2}
-                y={tower.z - side / 2}
-                width={side}
-                height={side}
+                x={tower.x - sq / 2}
+                y={tower.z - sq / 2}
+                width={sq}
+                height={sq}
                 fill={roleFill(tower)}
                 stroke={selected ? "var(--c-ink)" : "none"}
-                strokeWidth={selected ? 2.5 : 0}
+                strokeWidth={selected ? H / 40 : 0}
               />
               {tower.status === "revisit" && (
                 <rect
-                  x={tower.x - side / 6}
-                  y={tower.z - side / 6}
-                  width={side / 3}
-                  height={side / 3}
+                  x={tower.x - sq / 6}
+                  y={tower.z - sq / 6}
+                  width={sq / 3}
+                  height={sq / 3}
                   fill="var(--c-accent-2)"
                 />
               )}
@@ -171,9 +144,7 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
         <div
           className="ui-meta absolute px-2 py-1"
           style={{
-            left: clampX(pxx(scene.home.x)),
-            top: clampY(pxy(scene.home.z), 44, box.h - 20),
-            transform: "translate(-50%, -130%)",
+            ...homeStyle,
             background: "var(--c-ink)",
             color: "var(--c-canvas)",
           }}
@@ -182,11 +153,53 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
         </div>
       )}
       {side > 0 &&
-        scene.towers.map((tower) => {
-          const p = placedById.get(tower.id) ?? {
-            left: clampX(pxx(tower.x)),
-            top: clampY(pxy(tower.z) + 16, 30, Math.max(30, box.h - 64)),
+        scene.towers.map((tower, i) => {
+          const open = tower.id === selectedId || tower.id === hoverId;
+          const left = clampX(pxx(tower.x));
+          const top = clampY(pxy(tower.z));
+          const hover = {
+            onMouseEnter: () => setHoverId(tower.id),
+            onMouseLeave: () => setHoverId((h) => (h === tower.id ? null : h)),
+            onFocus: () => setHoverId(tower.id),
+            onBlur: () => setHoverId((h) => (h === tower.id ? null : h)),
           };
+          if (!open) {
+            return (
+              <button
+                key={tower.id}
+                type="button"
+                onClick={() => onSelect(tower.id)}
+                aria-label={`${i + 1}: ${tower.name}, ${Math.round(tower.distanceM)} metres`}
+                className="absolute flex items-center justify-center"
+                style={{
+                  left,
+                  top,
+                  transform: "translate(-50%, -100%)",
+                  minWidth: 44,
+                  minHeight: 44,
+                  background: "transparent",
+                  border: "0",
+                  padding: 0,
+                  cursor: "pointer",
+                }}
+                {...hover}
+              >
+                <span
+                  aria-hidden="true"
+                  className="ui-meta flex items-center justify-center"
+                  style={{
+                    width: 26,
+                    height: 26,
+                    background: "var(--c-surface)",
+                    border: "2px solid var(--c-line-strong)",
+                    color: "var(--c-ink)",
+                  }}
+                >
+                  {i + 1}
+                </span>
+              </button>
+            );
+          }
           return (
             <button
               key={tower.id}
@@ -195,12 +208,12 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
               aria-pressed={tower.id === selectedId}
               className="ui-meta absolute"
               style={{
-                left: p.left,
-                top: p.top,
+                left,
+                top: clampY(pxy(tower.z) + 14),
                 transform: "translate(-50%, 0)",
                 minWidth: 44,
                 minHeight: 44,
-                padding: "8px",
+                padding: "8px 10px",
                 background: "var(--c-surface)",
                 border: "2px solid var(--c-line-strong)",
                 outline: tower.id === selectedId ? "2px solid var(--c-accent)" : "none",
@@ -208,8 +221,9 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
                 cursor: "pointer",
                 whiteSpace: "nowrap",
               }}
+              {...hover}
             >
-              {tower.name} · {Math.round(tower.distanceM)}M
+              {compactLabel(tower.name, tower.distanceM)}
             </button>
           );
         })}

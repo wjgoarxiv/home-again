@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { compactLabel, fitScene } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
 
 export type VoxelWorldProps = {
@@ -22,13 +23,12 @@ type Palette = {
   sunken: string;
 };
 
-type Label = { id: string; name: string; distanceM: number; left: number; top: number; tickTop: number; tick: boolean };
+type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number };
 
 const HALF = 80;
 const CELL = 4;
 const VOX = 1.8;
 const VOX_H = 1;
-const VIEW_SIZE = 175;
 const GREY = "#8b8e89";
 
 function readPalette(): Palette {
@@ -152,10 +152,13 @@ function buildGround(palette: Palette): THREE.InstancedMesh {
     }
   }
   const mesh = boxMesh(cells.length, palette.surface);
+  const base = new THREE.Color(palette.surface);
   cells.forEach((c, i) => {
     const w = c.street ? CELL * 0.55 : CELL * 0.92;
     const h = Math.max(c.top, 0.1);
-    const color = c.street ? palette.line : cellHash(i, 7) % 2 === 0 ? palette.surface : palette.sunken;
+    const color = c.street
+      ? palette.sunken
+      : `#${base.clone().offsetHSL(0, 0, ((cellHash(i, 7) % 100) / 100 - 0.5) * 0.03).getHexString()}`;
     place(mesh, i, c.x, c.top - h / 2, c.z, w, h, w, color);
   });
   mesh.instanceMatrix.needsUpdate = true;
@@ -174,7 +177,14 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
   const [labels, setLabels] = useState<Label[]>([]);
-  const [homeLabel, setHomeLabel] = useState({ left: 0, top: 0 });
+  const [homeLabel, setHomeLabel] = useState<{
+    left?: number;
+    top?: number;
+    right?: number;
+    bottom?: number;
+    transform?: string;
+  }>({ left: 0, top: 0 });
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const threeRef = useRef<{
     renderer: THREE.WebGLRenderer;
     camera: THREE.OrthographicCamera;
@@ -192,6 +202,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     palette: Palette;
     pointers: Map<number, { x: number; y: number }>;
     pinchDist: number | null;
+    fitHalf: number;
+    fitKey: string;
+    applyFit: () => void;
+    renderNow: () => void;
   } | null>(null);
 
   useEffect(() => {
@@ -238,6 +252,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       palette,
       pointers: new Map<number, { x: number; y: number }>(),
       pinchDist: null as number | null,
+      fitHalf: 46,
+      fitKey: "",
+      applyFit: () => {},
+      renderNow: () => {},
     };
     threeRef.current = st;
 
@@ -246,14 +264,16 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       const h = container.clientHeight || 1;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, w < 640 ? 1.5 : 2));
       renderer.setSize(w, h, false);
-      const aspect = w / h;
-      const halfH = VIEW_SIZE / 2;
+      const aspect = Math.max(w / h, 0.2);
+      const viewSize = (2 * st.fitHalf) / aspect;
+      const halfH = viewSize / 2;
       camera.left = -halfH * aspect;
       camera.right = halfH * aspect;
       camera.top = halfH;
       camera.bottom = -halfH;
       camera.updateProjectionMatrix();
     };
+    st.applyFit = fit;
     fit();
 
     const render = () => {
@@ -271,33 +291,34 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       const h = container.clientHeight || 1;
       const current = sceneRef.current;
       const v = new THREE.Vector3();
-      const next: Label[] = current.towers.map((t) => {
+      const next: Label[] = current.towers.map((t, i) => {
         const top = st.tops.get(t.id) ?? VOX_H * t.height;
-        v.set(t.x, top + 0.6, t.z).project(camera);
-        const home = clamp((-v.y * 0.5 + 0.5) * h + 10, 30, Math.max(30, h - 64));
+        v.set(t.x, top + 0.4, t.z).project(camera);
         return {
           id: t.id,
+          n: i + 1,
           name: t.name,
           distanceM: t.distanceM,
-          left: clamp((v.x * 0.5 + 0.5) * w, 100, w - 100),
-          top: home,
-          tickTop: home,
-          tick: false,
+          left: clamp((v.x * 0.5 + 0.5) * w, 24, w - 24),
+          top: clamp((-v.y * 0.5 + 0.5) * h, 24, h - 24),
         };
       });
-      next.sort((a, b) => a.top - b.top);
-      let prevBottom = -Infinity;
-      for (const label of next) {
-        if (label.top < prevBottom + 4) label.top = Math.min(label.top + (prevBottom + 4 - label.top), Math.max(30, h - 64));
-        label.tick = label.top - label.tickTop > 30;
-        prevBottom = Math.max(prevBottom, label.top + 44);
-      }
       setLabels(next);
       v.set(current.home.x, 7, current.home.z).project(camera);
-      setHomeLabel({
-        left: clamp((v.x * 0.5 + 0.5) * w, 110, w - 110),
-        top: clamp((-v.y * 0.5 + 0.5) * h, 40, h - 20),
-      });
+      const hx = (v.x * 0.5 + 0.5) * w;
+      const hy = (-v.y * 0.5 + 0.5) * h;
+      setHomeLabel(
+        hx < 0 || hx > w || hy < 0 || hy > h
+          ? {
+              ...(hx <= w / 2 ? { left: 8 } : { right: 8 }),
+              ...(hy <= h / 2 ? { top: 8 } : { bottom: 8 }),
+            }
+          : {
+              left: clamp(hx, 110, w - 110),
+              top: clamp(hy, 40, h - 20),
+              transform: "translate(-50%, -130%)",
+            },
+      );
     };
     (st as { render?: () => void }).render = render;
     (st as { updateLabels?: () => void }).updateLabels = updateLabels;
@@ -329,7 +350,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         renderNow();
         return;
       }
-      const wpp = VIEW_SIZE / h / camera.zoom;
+      const wpp = (camera.top * 2) / h / camera.zoom;
       const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
       right.y = 0;
       right.normalize();
@@ -338,8 +359,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       up.normalize();
       st.target.addScaledVector(right, -dx * wpp);
       st.target.addScaledVector(up, dy * wpp);
-      st.target.x = Math.min(45, Math.max(-45, st.target.x));
-      st.target.z = Math.min(45, Math.max(-45, st.target.z));
+      st.target.x = Math.min(st.fitHalf, Math.max(-st.fitHalf, st.target.x));
+      st.target.z = Math.min(st.fitHalf, Math.max(-st.fitHalf, st.target.z));
       renderNow();
     };
     const onPointerUp = (e: PointerEvent) => {
@@ -395,6 +416,16 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     if (!st) return;
     const renderNow = () => (threeRef.current as unknown as { render: () => void }).render();
     const { palette } = st;
+
+    const fit = fitScene(scene);
+    const fitKey = fit.halfSize.toFixed(2);
+    if (fitKey !== st.fitKey) {
+      st.fitKey = fitKey;
+      st.fitHalf = fit.halfSize;
+      st.camera.zoom = 1;
+      st.target.set(0, 0, 0);
+      st.applyFit();
+    }
 
     if (st.content) {
       st.root.remove(st.content);
@@ -579,54 +610,85 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       <div
         className="ui-meta pointer-events-none absolute z-10 px-2 py-1"
         style={{
-          left: homeLabel.left,
-          top: homeLabel.top,
-          transform: "translate(-50%, -130%)",
+          ...homeLabel,
           background: "var(--c-ink)",
           color: "var(--c-canvas)",
         }}
       >
         {scene.home.label}
       </div>
-      {labels.map((label) => (
-        <span key={`tick-${label.id}`}>
-          {label.tick && (
-            <span
-              aria-hidden="true"
-              className="absolute z-10"
+      {labels.map((label) => {
+        const open = label.id === selectedId || label.id === hoverId;
+        if (!open) {
+          return (
+            <button
+              key={label.id}
+              type="button"
+              onClick={() => onSelectRef.current(label.id)}
+              onMouseEnter={() => setHoverId(label.id)}
+              onMouseLeave={() => setHoverId((h) => (h === label.id ? null : h))}
+              onFocus={() => setHoverId(label.id)}
+              onBlur={() => setHoverId((h) => (h === label.id ? null : h))}
+              aria-label={`${label.n}: ${label.name}, ${Math.round(label.distanceM)} metres`}
+              className="absolute z-10 flex items-center justify-center"
               style={{
                 left: label.left,
-                top: label.tickTop,
-                width: 2,
-                height: label.top - label.tickTop,
-                background: "var(--c-line-strong)",
+                top: label.top,
+                transform: "translate(-50%, -100%)",
+                minWidth: 44,
+                minHeight: 44,
+                background: "transparent",
+                border: "0",
+                padding: 0,
+                cursor: "pointer",
               }}
-            />
-          )}
+            >
+              <span
+                aria-hidden="true"
+                className="ui-meta flex items-center justify-center"
+                style={{
+                  width: 26,
+                  height: 26,
+                  background: "var(--c-surface)",
+                  border: "2px solid var(--c-line-strong)",
+                  color: "var(--c-ink)",
+                }}
+              >
+                {label.n}
+              </span>
+            </button>
+          );
+        }
+        return (
           <button
+            key={label.id}
             type="button"
             onClick={() => onSelectRef.current(label.id)}
+            onMouseEnter={() => setHoverId(label.id)}
+            onMouseLeave={() => setHoverId((h) => (h === label.id ? null : h))}
+            onFocus={() => setHoverId(label.id)}
+            onBlur={() => setHoverId((h) => (h === label.id ? null : h))}
             aria-pressed={label.id === selectedId}
-          className="ui-meta absolute z-10"
-          style={{
-            left: label.left,
-            top: label.top,
-            transform: "translate(-50%, 8px)",
-            minWidth: 44,
-            minHeight: 44,
-            padding: "8px",
-            background: "var(--c-surface)",
-            border: "2px solid var(--c-line-strong)",
-            outline: label.id === selectedId ? "2px solid var(--c-accent)" : "none",
-            outlineOffset: 2,
-            cursor: "pointer",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {label.name} · {Math.round(label.distanceM)}M
+            className="ui-meta absolute z-10"
+            style={{
+              left: label.left,
+              top: label.top,
+              transform: "translate(-50%, 10px)",
+              minWidth: 44,
+              minHeight: 44,
+              padding: "8px 10px",
+              background: "var(--c-surface)",
+              border: "2px solid var(--c-line-strong)",
+              outline: label.id === selectedId ? "2px solid var(--c-accent)" : "none",
+              outlineOffset: 2,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {compactLabel(label.name, label.distanceM)}
           </button>
-        </span>
-      ))}
+        );
+      })}
     </div>
   );
 }
