@@ -8,18 +8,18 @@ import type { Card, JourneyState } from "./schema";
  * revisit), made-up cafés, no network. The scripted run loves one café in week 1 and again in week 2.
  */
 
-type Fake = { id: string; name: string; bearing: number; metres: number; affinity: number; taste: string[]; street: string };
+type Fake = { id: string; name: string; bearing: number; metres: number; affinity: number; taste: string[]; street: string; why: string };
 
 const FAKES: Fake[] = [
-  { id: "fx-alder", name: "Alder Street Coffee", bearing: 40, metres: 380, affinity: 0.94, taste: ["espresso", "quiet", "pastries"], street: "East 7th St" },
-  { id: "fx-tompkins", name: "Tompkins Roast House", bearing: 100, metres: 620, affinity: 0.9, taste: ["roastery", "minimalist"], street: "Avenue A" },
-  { id: "fx-ninth", name: "Ninth and B Espresso", bearing: 160, metres: 260, affinity: 0.86, taste: ["espresso", "cozy"], street: "East 9th St" },
-  { id: "fx-heron", name: "Lazy Heron Cafe", bearing: 215, metres: 540, affinity: 0.81, taste: ["brunch", "plants"], street: "East 4th St" },
-  { id: "fx-slate", name: "Slate and Steam", bearing: 275, metres: 450, affinity: 0.77, taste: ["tea", "calm"], street: "Second Ave" },
-  { id: "fx-orchard", name: "Orchard Beanery", bearing: 320, metres: 330, affinity: 0.72, taste: ["pour-over", "bakery"], street: "St Marks Pl" },
-  { id: "fx-quill", name: "Quill and Kettle", bearing: 70, metres: 210, affinity: 0.7, taste: ["tea", "books"], street: "East 6th St" },
-  { id: "fx-bergen", name: "Bergen Bread and Bean", bearing: 190, metres: 590, affinity: 0.69, taste: ["bakery", "espresso"], street: "First Ave" },
-  { id: "fx-linden", name: "Linden and Oak", bearing: 345, metres: 480, affinity: 0.68, taste: ["quiet", "vintage"], street: "East 10th St" },
+  { id: "fx-alder", name: "Alder Street Coffee", bearing: 40, metres: 380, affinity: 0.94, taste: ["espresso", "quiet", "pastries"], street: "East 7th St", why: "Quiet, espresso-forward and known for pastries, the same calm corner feel as your old regular." },
+  { id: "fx-tompkins", name: "Tompkins Roast House", bearing: 100, metres: 620, affinity: 0.9, taste: ["roastery", "minimalist"], street: "Avenue A", why: "A minimalist roastery with a short espresso menu, close in spirit to your old regular." },
+  { id: "fx-ninth", name: "Ninth and B Espresso", bearing: 160, metres: 260, affinity: 0.86, taste: ["espresso", "cozy"], street: "East 9th St", why: "Cozy and espresso-led, the kind of small room your old regular was." },
+  { id: "fx-heron", name: "Lazy Heron Cafe", bearing: 215, metres: 540, affinity: 0.81, taste: ["brunch", "plants"], street: "East 4th St", why: "Plants and a slow brunch crowd, a softer take on your old regular's feel." },
+  { id: "fx-slate", name: "Slate and Steam", bearing: 275, metres: 450, affinity: 0.77, taste: ["tea", "calm"], street: "Second Ave", why: "A calm tea-first room, quiet like your old regular but with a different drink." },
+  { id: "fx-orchard", name: "Orchard Beanery", bearing: 320, metres: 330, affinity: 0.72, taste: ["pour-over", "bakery"], street: "St Marks Pl", why: "Pour-over and a bakery counter, echoing the pastry side of your old regular." },
+  { id: "fx-quill", name: "Quill and Kettle", bearing: 70, metres: 210, affinity: 0.7, taste: ["tea", "books"], street: "East 6th St", why: "Tea and shelves of books, a reading-nook cousin of your old regular." },
+  { id: "fx-bergen", name: "Bergen Bread and Bean", bearing: 190, metres: 590, affinity: 0.69, taste: ["bakery", "espresso"], street: "First Ave", why: "Bakery and espresso under one roof, matching two things your old regular did well." },
+  { id: "fx-linden", name: "Linden and Oak", bearing: 345, metres: 480, affinity: 0.68, taste: ["quiet", "vintage"], street: "East 10th St", why: "Quiet and a little vintage, the unhurried mood of your old regular." },
 ];
 
 const BY_ID = new Map(FAKES.map((f) => [f.id, f]));
@@ -44,7 +44,8 @@ function cardFor(f: Fake, area: JourneyState["area"], revisit: boolean): Card {
     hoursToday: "7:30 AM - 6:00 PM",
     tasteLink: f.taste.slice(0, 3),
     unknowns: ["seating", "how busy it is now"],
-    why: "Synthetic demo card: no Qloo call was made for it.",
+    why: f.why,
+    blurb: "Synthetic demo card: no Qloo call was made for it.",
     revisit,
   };
 }

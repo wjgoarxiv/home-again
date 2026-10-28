@@ -77,6 +77,7 @@ export function CafeCard({
   onSelect,
   tourVerdict,
   travel,
+  onNext,
 }: {
   card: Card;
   /** 1-based position, the same number the tower carries on the map. */
@@ -90,6 +91,8 @@ export function CafeCard({
   /** The verdict the guided demo is pressing on this card right now. */
   tourVerdict?: Verdict;
   travel?: CardTravel;
+  /** Offered once this card has a verdict and another café is still waiting for one; nothing moves until it is pressed. */
+  onNext?: () => void;
 }) {
   if (!selected) {
     return (
@@ -106,8 +109,12 @@ export function CafeCard({
 
   return (
     <article id={`card-${card.entityId}`} className="ui-callout" style={{ outline: "2px solid var(--c-accent)", outlineOffset: "-2px", gap: "var(--sp-12)", padding: "var(--sp-12)" }} onClick={onSelect}>
-      <header className="flex items-start justify-between gap-3">
-        <h3 className="ui-h4 min-w-0 break-words">
+      <header className="flex items-start gap-3">
+        {card.photoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element -- Qloo-hosted photo, sized by the flex row
+          <img src={card.photoUrl} alt={`${card.name}, photo from Qloo`} loading="lazy" className="h-14 w-14 shrink-0 border border-line object-cover" style={{ borderRadius: "var(--radius-sm)" }} />
+        )}
+        <h3 className="ui-h4 min-w-0 flex-1 break-words">
           <span className="ui-tag ui-num mr-2 align-middle">{index}</span>
           {card.name}
         </h3>
@@ -146,25 +153,34 @@ export function CafeCard({
             );
           })}
         </div>
-        <p className="ui-meta" role="status" aria-live="polite">
-          {verdict ? VERDICTS.find((v) => v.value === verdict)?.hint : "How was it? Your pick shapes next week's list."}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="ui-meta min-w-0" role="status" aria-live="polite">
+            {verdict ? VERDICTS.find((v) => v.value === verdict)?.hint : "How was it? Your pick shapes next week's list."}
+          </p>
+          {verdict && onNext && (
+            <button
+              type="button"
+              className="ui-btn shrink-0"
+              style={{ whiteSpace: "nowrap" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onNext();
+              }}
+            >
+              Next café →
+            </button>
+          )}
+        </div>
       </fieldset>
 
-      <div className="flex gap-3">
-        {card.photoUrl && (
-          // eslint-disable-next-line @next/next/no-img-element -- Qloo-hosted photo, sized by the flex row
-          <img src={card.photoUrl} alt={`${card.name}, photo from Qloo`} loading="lazy" className="h-20 w-20 shrink-0 border border-line object-cover" style={{ borderRadius: "var(--radius-sm)" }} />
-        )}
-        <div className="ui-stack ui-stack--tight min-w-0">
-          {card.revisit && <span className="ui-tag ui-tag--accent self-start">♥ you loved this one · go back?</span>}
-          <p className="ui-meta ui-num">
-            {card.hoursToday ? `today ${card.hoursToday}` : "hours unknown"}
-            {card.priceLevel ? ` · ${"$".repeat(card.priceLevel)}` : ""}
-            {card.address ? ` · ${card.address}` : ""}
-          </p>
-          {card.blurb && <p className="ui-small">{card.blurb}</p>}
-        </div>
+      <div className="ui-stack ui-stack--tight min-w-0">
+        {card.revisit && <span className="ui-tag ui-tag--accent self-start">♥ you loved this one · go back?</span>}
+        <p className="ui-meta ui-num">
+          {card.hoursToday ? `today ${card.hoursToday}` : "hours unknown"}
+          {card.priceLevel ? ` · ${"$".repeat(card.priceLevel)}` : ""}
+          {card.address ? ` · ${card.address}` : ""}
+        </p>
+        {card.blurb && <p className="ui-small">{card.blurb}</p>}
       </div>
 
       {travel && <TravelSwitch travel={travel} />}

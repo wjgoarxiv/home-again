@@ -18,6 +18,7 @@ import {
 } from "@/lib/stage";
 import { AutoplayBar, WatchButton, useAutoplay } from "./Autoplay";
 import { CafeCard, type CardTravel } from "./CafeCard";
+import { nextUnmarked } from "@/lib/verdictFlow";
 import { QLOO_NOTE, QlooPanel, type Trace } from "./QlooPanel";
 import { RegularFound } from "./RegularFound";
 import { SeedForm } from "./SeedForm";
@@ -291,19 +292,11 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     if (activeId) document.getElementById(`card-${activeId}`)?.scrollIntoView({ block: "nearest" });
   }, [activeId, cards, panels.sheetOpen, compact]);
 
-  /** Record a verdict; a first answer moves on to the next café still waiting for one, after a beat to see the press. */
-  function mark(id: string, v: Verdict) {
-    const first = !verdicts[id];
-    setVerdicts((s) => ({ ...s, [id]: v }));
-    if (!first) return;
-    const open = cards.filter((c) => c.entityId !== id && !verdicts[c.entityId]);
-    const next = open.find((c) => cards.indexOf(c) > cards.findIndex((x) => x.entityId === id)) ?? open[0];
-    if (next) window.setTimeout(() => select(next.entityId), 450);
-  }
-
   function cardFor(c: Card, i: number) {
     const id = c.entityId;
     const selected = activeId === id;
+    // Only a nudge: the next café is offered after a verdict, never travelled to on its own, and never during the guided demo.
+    const nextId = selected && !autoplay.active && verdicts[id] ? nextUnmarked(cards.map((x) => x.entityId), verdicts, id) : null;
     const cardTravel: CardTravel | undefined = selected
       ? { mode: travel.mode, status: tripStatus(travel, id), info: travel.info?.id === id ? travel.info : travel.lastInfo?.id === id ? travel.lastInfo : null, onMode: (m) => chooseMode(m, id) }
       : undefined;
@@ -317,7 +310,8 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         disabled={busy}
         selected={selected}
         onSelect={() => select(id)}
-        onVerdict={(v) => mark(id, v)}
+        onVerdict={(v) => setVerdicts((s) => ({ ...s, [id]: v }))}
+        onNext={nextId ? () => select(nextId) : undefined}
         tourVerdict={tourStep?.verdict?.id === id ? tourStep.verdict.verdict : undefined}
         travel={cardTravel}
       />
