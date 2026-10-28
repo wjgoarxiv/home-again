@@ -335,6 +335,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
       <div
         data-stage
         data-tour="world"
+        data-ui-moment="chart"
         className="absolute inset-0 isolate"
         style={{ "--stage-inset-bottom": `calc(var(--dock-h, 0px) + ${compact && !panels.sheetOpen && sheetHeight ? sheetHeight + 12 : 0}px)` } as CSSProperties}
       >
@@ -360,7 +361,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         {showStart && (
           <div className="absolute inset-0 flex items-end justify-center p-3 sm:p-4 lg:items-start lg:justify-start lg:p-8">
             <section
-              className={`ui-panel pointer-events-auto flex max-h-[min(66dvh,100%)] w-full flex-col overflow-y-auto lg:max-h-full ${formOpen ? "lg:max-w-[700px]" : "lg:max-w-[580px]"}`}
+              className={`ui-panel pointer-events-auto flex max-h-[min(66dvh,100%)] w-full flex-col overflow-y-auto lg:max-h-full [&>*]:shrink-0 ${formOpen ? "lg:max-w-[700px]" : "lg:max-w-[580px]"}`}
               style={{ "--panel-pad": "var(--sp-20)", boxShadow: "var(--shadow-overlay)", rowGap: "var(--sp-16)" } as CSSProperties}
               aria-busy={busy}
             >
@@ -386,15 +387,17 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                       Try your own café
                     </button>
                   </div>
-                  <ol data-tour="intro" className="grid gap-2 sm:grid-cols-3" aria-label="How it works">
+                  <ol data-tour="intro" className="grid grid-cols-3 gap-2" aria-label="How it works">
                     {EXPLAIN.map((e) => (
                       <li key={e.n} className="ui-callout" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
-                        <div className="flex items-center gap-3 sm:flex-col sm:items-start sm:gap-2">
-                          <Glyph heights={[...e.heights]} accent={"accent" in e} />
+                        <div className="flex flex-col items-start gap-2">
+                          <span className="max-sm:hidden">
+                            <Glyph heights={[...e.heights]} accent={"accent" in e} />
+                          </span>
                           <div className="min-w-0">
                             <p className="ui-coord ui-num hidden sm:block">{e.n}</p>
                             <h2 className="ui-h4">{e.title}</h2>
-                            <p className="ui-small">{e.text}</p>
+                            <p className="ui-small max-sm:hidden [@media(max-height:760px)]:hidden">{e.text}</p>
                           </div>
                         </div>
                       </li>
@@ -412,7 +415,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                   {notice}
                 </p>
               )}
-              <p className="ui-meta">{QLOO_NOTE}</p>
+              <p className="ui-meta max-sm:hidden [@media(max-height:760px)]:hidden">{QLOO_NOTE}</p>
             </section>
           </div>
         )}
