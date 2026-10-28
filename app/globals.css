@@ -17,6 +17,35 @@
   --color-negative: var(--c-negative);
 }
 
+/* World palette (read by components/world/palette.ts; keep FALLBACK_PALETTE there in sync).
+   Bright pastel, never flipped for dark mode so the map stays light. Cars avoid the café colours
+   (--c-accent coral, --c-accent-2 plotter blue). The road is a cool grey-blue against the cream ground. */
+:root {
+  --w-sky: #d6ebfa;
+  --w-ground: #f1ece1;
+  --w-sidewalk: #e6e0d3;
+  --w-road: #a3abb5;
+  --w-marking: #ffffff;
+  --w-crossing: #fdfcf7;
+  --w-park: #c3e6c4;
+  --w-leaf: #9fd8a6, #b8e3a3, #8ecfb2;
+  --w-trunk: #a9846b;
+  --w-facades: #f6c9c4, #fbd9b3, #fbefb8, #cbe8d2, #c9ddf3, #dacdf1, #f3d6e7;
+  --w-roofs: #ebe6de, #d2d9e1, #bdb6ac;
+  --w-glass: #93b6d2;
+  --w-lit-window: #ffe8a3;
+  --w-awning: #f08a8a, #7fb7e6, #8fd0a5, #f2b66d;
+  --w-signal-red: #e5534b;
+  --w-signal-green: #3fae6b;
+  --w-cars: #4fb8a8, #9b87d8, #efd24f, #6ec5ee, #5f6b86, #d98fc0;
+  --w-wheel: #3b4048;
+  --w-headlight: #fffbe8;
+  --w-taillight: #e5484d;
+  --w-people: #6d6875, #b5838d, #4f7ca3, #8a9a5b;
+  --w-steam: #ffffff;
+  --w-bird: #6d6875;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
