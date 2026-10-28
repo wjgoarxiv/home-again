@@ -3,11 +3,11 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { buildScene } from "../../lib/world";
-import { buildGraph, type P, type TravelMode } from "../../lib/route";
+import { buildGraph, polylinesFromSnapshot, type P, type TravelMode } from "../../lib/route";
 import type { Card, JourneyState, Verdict } from "../../lib/schema";
 import type { GeoSnapshot } from "../../lib/geomap";
 import FlatMap from "./FlatMap";
-import { geoPolylines, loadGeo, tripFor } from "./realTown";
+import { loadGeo, tripFor } from "./realTown";
 
 /** What the stage hears when the user's character sets off: which café, how it gets there and how far. */
 export type TripInfo = { id: string; mode: TravelMode; lengthM: number; durationSec: number };
@@ -105,7 +105,7 @@ export default function World({
     const tower = scene.towers.find((t) => t.id === travelTo);
     if (!tower) return;
     ft.key = travelTo;
-    const graph = buildGraph(geo ? geoPolylines(geo) : []);
+    const graph = buildGraph(geo ? polylinesFromSnapshot(geo) : []);
     const trip = tripFor(graph, ft.pos, { x: tower.x, z: tower.z }, travelMode);
     ft.pos = { x: tower.x, z: tower.z };
     setFlatPos(ft.pos);

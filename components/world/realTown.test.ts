@@ -5,7 +5,6 @@ import { FALLBACK_PALETTE } from "./palette";
 import {
   buildRealTown,
   buildingsForScene,
-  geoPolylines,
   heightUnits,
   loadGeo,
   sceneBuildings,
@@ -160,21 +159,6 @@ describe("streetsForLife", () => {
     expect(streets.every((st) => st.dir === "x")).toBe(true);
     expect(streets.find((st) => st.z === 0)!.lanes).toBe(2);
     expect(streets.find((st) => st.z === 8)!.lanes).toBe(1);
-  });
-});
-
-describe("geoPolylines", () => {
-  it("turns street centrelines into scene-unit polylines", () => {
-    const s = snap([], [line(2, 0, 0, 10, 0, 10, 20), line(1, -5, -5, 5, -5)]);
-    expect(geoPolylines(s)).toEqual([
-      [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 10, z: 20 }],
-      [{ x: -5, z: -5 }, { x: 5, z: -5 }],
-    ]);
-  });
-
-  it("skips degenerate streets with fewer than two points", () => {
-    const s = snap([], [{ l: 1, p: [250, 250] }, line(1, 0, 0, 3, 0)]);
-    expect(geoPolylines(s)).toHaveLength(1);
   });
 });
 

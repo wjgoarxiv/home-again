@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { clampZoom, compactLabel, fitAllScene, fitScene, followZoom, isoFit } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
-import { buildGraph, type P, type StreetGraph, type TravelMode } from "../../lib/route";
+import { buildGraph, polylinesFromSnapshot, type P, type StreetGraph, type TravelMode } from "../../lib/route";
 import { buildTown, planTown, seedFromString, streetPolylines, type TownCafe, type TownPalette } from "./town";
 import { createLife, type LifeHandle } from "./life";
 import { createTraveler, type TravelerHandle } from "./traveler";
 import type { Street } from "../../lib/life";
 import type { GeoSnapshot } from "../../lib/geomap";
 import { worldPalette, type WorldPalette } from "./palette";
-import { buildRealTown, geoPolylines, tripFor, type CafeSpot, type RealTown } from "./realTown";
+import { buildRealTown, tripFor, type CafeSpot, type RealTown } from "./realTown";
 import type { TripInfo } from "./World";
 
 export type VoxelWorldProps = {
@@ -49,6 +49,9 @@ const LOT_Y = 0.22;
 /** The newcomer's home: where the character starts, a little house on the area centre. */
 const HOME_CLEAR = 2.2;
 const HOME_PAD = 3.2;
+/** The character stands in front of the house door (+z face) and at each café's front corner, not inside the box. */
+const HOME_STEP: P = { x: 0, z: 1.1 };
+const CAFE_STEP = 1.15;
 /** Towers rise in this many steps when new cards arrive. */
 const RISE_STEPS = 4;
 const RISE_MS = 110;
@@ -103,7 +106,7 @@ type ThreeState = {
   readInset: () => void;
   graph: StreetGraph | null;
   traveler: TravelerHandle | null;
-  /** Where the character stands (home until the first trip, then wherever the last trip ended). */
+  /** Where the character stands (home's doorstep until the first trip, then wherever the last trip ended). */
   pos: P;
   trip: TripInfo | null;
   /** The travelMode prop the trip under way was planned with. */
@@ -245,6 +248,51 @@ function houseMesh(world: WorldPalette): THREE.InstancedMesh {
   return mesh;
 }
 
+/**
+ * Buildings are taller than the street is wide, so from the isometric camera they hide the character most of the
+ * time. Every mesh under `rig` gets a see-through twin that draws only where something is in front of the original
+ * (a flat translucent silhouette), kept in step with the original each frame.
+ */
+function makeGhosts(rig: THREE.Group, color: string): { sync: () => void } {
+  const material = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.5,
+    depthFunc: THREE.GreaterDepth,
+    depthWrite: false,
+  });
+  const pairs: { src: THREE.Mesh; ghost: THREE.Mesh }[] = [];
+  for (const src of [...rig.children] as THREE.Mesh[]) {
+    if (!src.isMesh) continue;
+    const instanced = src as THREE.InstancedMesh;
+    let ghost: THREE.Mesh;
+    if (instanced.isInstancedMesh) {
+      const g = new THREE.InstancedMesh(src.geometry, material, instanced.instanceMatrix.count);
+      g.instanceMatrix = instanced.instanceMatrix;
+      ghost = g;
+    } else {
+      ghost = new THREE.Mesh(src.geometry, material);
+    }
+    ghost.frustumCulled = false;
+    ghost.renderOrder = 5;
+    rig.add(ghost);
+    pairs.push({ src, ghost });
+  }
+  return {
+    sync: () => {
+      for (const { src, ghost } of pairs) {
+        ghost.visible = src.visible;
+        if ((src as THREE.InstancedMesh).isInstancedMesh) (ghost as THREE.InstancedMesh).count = (src as THREE.InstancedMesh).count;
+        else {
+          ghost.position.copy(src.position);
+          ghost.quaternion.copy(src.quaternion);
+          ghost.scale.copy(src.scale);
+        }
+      }
+    },
+  };
+}
+
 export default function VoxelWorld({
   scene,
   selectedId,
@@ -311,8 +359,11 @@ export default function VoxelWorld({
 
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     const target = new THREE.Vector3(0, 0, 0);
-    const traveler = createTraveler({ scene: root, palette: world });
-    traveler.place(0, 0);
+    const rig = new THREE.Group();
+    root.add(rig);
+    const traveler = createTraveler({ scene: rig, palette: world });
+    traveler.place(HOME_STEP.x, HOME_STEP.z);
+    const ghosts = makeGhosts(rig, world.avatar);
     const st: ThreeState = {
       renderer,
       camera,
@@ -350,7 +401,7 @@ export default function VoxelWorld({
       readInset: () => {},
       graph: null,
       traveler,
-      pos: { x: 0, z: 0 },
+      pos: { ...HOME_STEP },
       trip: null,
       tripMode: "auto",
       follow: false,
@@ -391,6 +442,7 @@ export default function VoxelWorld({
       camera.position.copy(st.target).add(iso);
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
+      ghosts.sync();
       renderer.render(root, camera);
       container.dataset.draws = String(renderer.info.render.calls);
       container.dataset.tris = String(renderer.info.render.triangles);
@@ -528,11 +580,12 @@ export default function VoxelWorld({
       if (!st.traveler) return;
       clearCamTimers();
       clearGuard();
-      const trip = tripFor(st.graph ?? EMPTY_GRAPH, st.pos, { x: to.x, z: to.z }, modeRef.current);
+      const door: P = { x: to.x + CAFE_STEP, z: to.z + CAFE_STEP };
+      const trip = tripFor(st.graph ?? EMPTY_GRAPH, st.pos, door, modeRef.current);
       if (trip.lengthM < ARRIVED_M) {
         st.trip = null;
-        st.traveler.place(to.x, to.z);
-        st.pos = { x: to.x, z: to.z };
+        st.traveler.place(door.x, door.z);
+        st.pos = door;
         onTripRef.current?.(null);
         onArriveRef.current?.(to.id);
         renderNow();
@@ -737,7 +790,7 @@ export default function VoxelWorld({
     const st = threeRef.current;
     if (!st) return;
     // The street graph is built once per area; the procedural town builds its own from its plan.
-    st.graph = geo ? buildGraph(geoPolylines(geo)) : null;
+    st.graph = geo ? buildGraph(polylinesFromSnapshot(geo)) : null;
     if (!geo) {
       st.realTown = null;
       return;

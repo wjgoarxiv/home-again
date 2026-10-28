@@ -57,17 +57,24 @@ class Bucket {
 
 import type { Street } from "../../lib/life";
 import type { P } from "../../lib/route";
+import { ROAD_BASE_W, ROAD_LANE_W } from "./realTown";
 
 export type { Street };
 
 /**
- * A street runs `length` units from (x, z) along +dir. The street start line is the
- * road centreline: the surface extends +/-(lanes * LANE_W + 0.4) / 2 across it, so the
- * life lane's cars (offset +/-0.35) and pedestrians (+/-0.6) stay on the pavement.
- * Lane paint on the centreline is the host's call.
+ * A street runs `length` units from (x, z) along +dir. The street start line is the road centreline.
+ * Road ribbons are as wide as the real town's (0.75 one lane, 0.95 two) with the same heights (sidewalk top
+ * 0.015, road top 0.03, lane paint 0.05), so the life layer's cars (lane offset 0.12, 0.42 long) and people
+ * (on the sidewalk strip beside the road edge) sit on them exactly as in the real town.
  */
-export const STREET_LANE_W = 1.6;
-export const roadWidth = (lanes: 1 | 2): number => lanes * STREET_LANE_W + 0.4;
+export const roadWidth = (lanes: 1 | 2): number => ROAD_BASE_W + ROAD_LANE_W * lanes;
+/** Top faces of the flat layers, matching realTown's ribbons. */
+const Y_SIDE = 0.015;
+const Y_ROAD = 0.03;
+const Y_PAINT = 0.04;
+/** A post or curb-side fixture stands this far beyond a two-lane road's edge. */
+const CURB_GAP = 0.8;
+const postOffset = roadWidth(2) / 2 + CURB_GAP;
 
 export type TownCafe = { x: number; z: number; clear: number; cap: number };
 export type TownOptions = { seed: number; half?: number; cafes?: TownCafe[] };
@@ -206,7 +213,10 @@ export function planTown(opts: TownOptions): TownPlan {
         const w = Math.min(3.4, b.w / n);
         const x = b.x - b.w / 2 + (b.w / n) * (i + 0.5);
         const d = b.d * (0.5 + rng() * 0.15);
-        const h = 4 + Math.floor(rng() * 3);
+        let h = 4 + Math.floor(rng() * 3);
+        for (const c of cafes) {
+          if (Math.hypot(x - c.x, b.z - c.z) < 11) h = Math.min(h, c.cap);
+        }
         if (!rectClearOfCircles(x, b.z, w, d, cafeCircles)) continue;
         buildings.push({ x, z: b.z, w, d, h, variant: Math.floor(rng() * 4), brick: true });
       }
@@ -263,7 +273,7 @@ export function planTown(opts: TownOptions): TownPlan {
     streetZs.forEach(({ z }, si) => {
       if ((ai + si) % 2 !== 0) return;
       if (lamps.length >= 44) return;
-      lamps.push({ x: ax + 2.6, z: z + 2.6 });
+      lamps.push({ x: ax + postOffset, z: z + postOffset });
     });
   });
 
@@ -279,7 +289,7 @@ export function planTown(opts: TownOptions): TownPlan {
   avenueXs.forEach((ax) => {
     streetZs.forEach(({ z, lanes }) => {
       if (lanes !== 2) return;
-      signals.push({ x: ax - 2.6, z: z - 2.6 });
+      signals.push({ x: ax - postOffset, z: z - postOffset });
       crossings.push({ x: ax, z });
     });
   });
@@ -343,36 +353,31 @@ export function buildTown(
     const cz = s.dir === "z" ? s.z + s.length / 2 : s.z;
     const sx = s.dir === "z" ? w : s.length;
     const sz = s.dir === "z" ? s.length : w;
-    at("road").add(cx, 0.0, cz, sx, 0.12, sz);
-    const ex = s.dir === "z" ? 0.12 : s.length;
-    const ez = s.dir === "z" ? s.length : 0.12;
-    const ox = s.dir === "z" ? w / 2 - 0.15 : 0;
-    const oz = s.dir === "z" ? 0 : w / 2 - 0.15;
-    at("marking").add(cx - ox, 0.07, cz - oz, ex, 0.02, ez);
-    at("marking").add(cx + ox, 0.07, cz + oz, ex, 0.02, ez);
+    at("road").add(cx, Y_ROAD - 0.05, cz, sx, 0.1, sz);
     if (s.lanes === 2) {
-      for (let d = 1.5; d < s.length - 1; d += 3) {
-        const dx = s.dir === "z" ? cx : s.x + d;
-        const dz = s.dir === "z" ? s.z + d : cz;
-        at("marking").add(dx, 0.07, dz, s.dir === "z" ? 0.18 : 1.2, 0.02, s.dir === "z" ? 1.2 : 0.18);
+      // Centre dashes as in the real town: 0.5 long, one unit apart.
+      for (let d = 0.25; d + 0.5 <= s.length - 0.25; d += 1) {
+        const mx = s.dir === "z" ? cx : s.x + d + 0.25;
+        const mz = s.dir === "z" ? s.z + d + 0.25 : cz;
+        at("marking").add(mx, Y_PAINT, mz, s.dir === "z" ? 0.07 : 0.5, 0.02, s.dir === "z" ? 0.5 : 0.07);
       }
     }
   }
 
-  for (const b of plan.blocks) at("side").add(b.x, 0.1, b.z, b.w, 0.12, b.d);
+  for (const b of plan.blocks) at("side").add(b.x, Y_SIDE - 0.05, b.z, b.w, 0.1, b.d);
   for (const c of plan.crossings) {
     for (let k = -2; k <= 2; k++) {
-      at("cross").add(c.x + k * 0.9, 0.13, c.z, 0.5, 0.02, 2.6);
+      at("cross").add(c.x + k * 0.14, Y_PAINT, c.z, 0.07, 0.02, roadWidth(2) - 0.15);
     }
   }
-  at("grass").add(plan.park.x, 0.12, plan.park.z, plan.park.w - 2, 0.16, plan.park.d - 2);
-  at("path").add(plan.park.x, 0.21, plan.park.z, plan.park.w - 2, 0.04, 2);
-  at("path").add(plan.park.x, 0.21, plan.park.z, 2, 0.04, plan.park.d - 2);
+  at("grass").add(plan.park.x, Y_SIDE - 0.005, plan.park.z, plan.park.w - 2, 0.04, plan.park.d - 2);
+  at("path").add(plan.park.x, Y_SIDE + 0.01, plan.park.z, plan.park.w - 2, 0.01, 2);
+  at("path").add(plan.park.x, Y_SIDE + 0.01, plan.park.z, 2, 0.01, plan.park.d - 2);
 
   for (const c of cafes) at("side").add(c.x, 0.14, c.z, 7, 0.16, 7);
 
   for (const b of plan.buildings) {
-    const baseY = 0.16;
+    const baseY = Y_SIDE;
     const st = facadeStyle(b);
     const walls = tones(palette.facades, b.brick ? [palette.brick] : [palette.wallA, palette.wallB]);
     const roofTones = tones(palette.roofs, [palette.roof]);
@@ -459,22 +464,22 @@ export function buildTown(
   }
 
   for (const t of plan.trees) {
-    at("trunk").add(t.x, 0.16 + 1, t.z, 0.5, 2, 0.5);
-    at("canopy").add(t.x, 2.16 + 1.1 * t.s, t.z, 2.2 * t.s, 2 * t.s, 2.2 * t.s);
+    at("trunk").add(t.x, Y_SIDE + 1, t.z, 0.5, 2, 0.5);
+    at("canopy").add(t.x, Y_SIDE + 2 + 1.1 * t.s, t.z, 2.2 * t.s, 2 * t.s, 2.2 * t.s);
   }
   for (const l of plan.lamps) {
-    at("pole").add(l.x, 0.16 + 2.5, l.z, 0.3, 5, 0.3);
-    at("lampHead").add(l.x, 5.31, l.z, 1.2, 0.3, 0.3);
+    at("pole").add(l.x, Y_SIDE + 2.5, l.z, 0.3, 5, 0.3);
+    at("lampHead").add(l.x, Y_SIDE + 5.15, l.z, 1.2, 0.3, 0.3);
   }
   for (const b of plan.benches) {
     const w = b.rot === 0 ? 2 : 0.8;
     const d = b.rot === 0 ? 0.8 : 2;
-    at("bench").add(b.x, 0.81, b.z, w, 0.25, d);
+    at("bench").add(b.x, Y_SIDE + 0.65, b.z, w, 0.25, d);
   }
   for (const s of plan.signals) {
-    at("pole").add(s.x, 0.16 + 2.25, s.z, 0.35, 4.5, 0.35);
-    at("signalHead").add(s.x, 4.11, s.z, 0.5, 0.5, 0.5, palette.signalA);
-    at("signalHead").add(s.x, 3.41, s.z, 0.5, 0.5, 0.5, palette.signalB);
+    at("pole").add(s.x, Y_SIDE + 2.25, s.z, 0.35, 4.5, 0.35);
+    at("signalHead").add(s.x, Y_SIDE + 3.95, s.z, 0.5, 0.5, 0.5, palette.signalA);
+    at("signalHead").add(s.x, Y_SIDE + 3.25, s.z, 0.5, 0.5, 0.5, palette.signalB);
   }
 
   const order: [string, string][] = [

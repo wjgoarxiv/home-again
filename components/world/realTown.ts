@@ -257,17 +257,6 @@ export function footprintPath(snapshot: GeoSnapshot): string {
   return parts.join("");
 }
 
-/** Street centrelines as scene-unit polylines: the input for lib/route's buildGraph. */
-export function geoPolylines(snapshot: GeoSnapshot): P[][] {
-  const out: P[][] = [];
-  for (const s of snapshot.streets) {
-    const line: P[] = [];
-    for (let i = 0; i + 1 < s.p.length; i += 2) line.push({ x: s.p[i] / DM_PER_UNIT, z: s.p[i + 1] / DM_PER_UNIT });
-    if (line.length >= 2) out.push(line);
-  }
-  return out;
-}
-
 const STRAIGHT_M_PER_SEC = { walk: 120, taxi: 260, bus: 260 };
 
 /** A trip along the streets; when the graph cannot route it, the straight line, so the character always moves. */
@@ -282,8 +271,9 @@ export function tripFor(graph: StreetGraph, from: P, to: P, mode: TravelMode | "
 
 // ---------------------------------------------------------------- Three
 
-const ROAD_BASE_W = 0.55;
-const ROAD_LANE_W = 0.2;
+/** Road ribbon width = base + lanes x lane width (0.75 one lane, 0.95 two); the procedural town and the life layer match it. */
+export const ROAD_BASE_W = 0.55;
+export const ROAD_LANE_W = 0.2;
 const SIDEWALK_EXTRA = 0.3;
 const GROUND_HALF = 64;
 const Y_SIDEWALK = 0.015;
