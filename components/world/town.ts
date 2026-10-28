@@ -435,9 +435,9 @@ export function buildTown(
         for (let k = 0; k < n; k++) {
           const c = stripes[(st.awningTone + (k % 2)) % stripes.length];
           const x = b.x - b.w / 2 + 0.2 + sw * (k + 0.5);
-          const wall = b.z + side * (b.d / 2 + 0.06);
-          at("awning").add(x, baseY + 1.34, wall + side * 0.2, sw, 0.12, 0.4, c);
-          at("awning").add(x, baseY + 1.2, wall + side * 0.58, sw, 0.12, 0.36, c);
+          const faceZ = b.z + side * (b.d / 2 + 0.06);
+          at("awning").add(x, baseY + 1.34, faceZ + side * 0.2, sw, 0.12, 0.4, c);
+          at("awning").add(x, baseY + 1.2, faceZ + side * 0.58, sw, 0.12, 0.36, c);
         }
       }
     }
