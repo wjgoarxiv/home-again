@@ -86,7 +86,7 @@ export function CafeCard({
                   onVerdict(v.value);
                 }}
                 className={`ui-btn ${on ? (v.value === "love" ? "ui-btn--primary" : "ui-btn--ink") : ""}${pressing ? " tour-press" : ""} text-[14px] sm:text-base`}
-                style={{ paddingInline: "var(--sp-4)" }}
+                style={{ paddingInline: "var(--sp-2)", whiteSpace: "normal", lineHeight: 1.2 }}
               >
                 {v.label}
               </button>

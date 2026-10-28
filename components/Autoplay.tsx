@@ -301,7 +301,7 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
         style={{
           position: "absolute",
           left: -3,
-          ...(labelBelow ? { top: 0 } : { bottom: "100%" }),
+          ...(labelBelow ? { top: "100%" } : { bottom: "100%" }),
           background: "var(--c-accent)",
           color: "var(--c-on-accent)",
           font: "700 13px/1 var(--font-mono)",
