@@ -209,7 +209,8 @@ const TOUR_CSS = `
 @keyframes tour-press { from { transform: translateY(0); } to { transform: translateY(3px); } }
 .tour-caption { animation: tour-slide 240ms steps(3, end) both; }
 .dock-caption { font-size: var(--fs-base); line-height: 1.35; min-height: calc(var(--fs-base) * 1.35 * 4); }
-@media (min-width: 768px) { .dock-caption { font-size: var(--fs-lg); min-height: calc(var(--fs-lg) * 1.35 * 3); } }
+@media (min-width: 768px) { .dock-caption { font-size: var(--fs-lg); min-height: calc(var(--fs-lg) * 1.35 * 4); } }
+@media (min-width: 900px) { .dock-caption { min-height: calc(var(--fs-lg) * 1.35 * 3); } }
 .tour-spot { animation: tour-snap 240ms steps(3, end) both; }
 .tour-fill { animation: tour-fill ${STEP_HOLD_MS}ms steps(16, end) both; }
 .tour-fill[data-paused="true"] { animation-play-state: paused; }
@@ -284,8 +285,8 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
       const r = el.getBoundingClientRect();
       const pr = parent.getBoundingClientRect();
       if (r.top >= pr.top && r.bottom <= pr.bottom) return;
-      // A card taller than its panel keeps its verdict buttons (the bottom) in view.
-      el.scrollIntoView({ block: stepRef.current.target === "cards" && r.height > pr.height ? "end" : "nearest" });
+      // Something taller than its panel shows its top; a card leads with its name, route switch and verdict buttons.
+      el.scrollIntoView({ block: r.height > pr.height ? "start" : "nearest" });
       measure();
     }, 60);
     const poll = window.setInterval(measure, 250);
@@ -305,6 +306,8 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
   // The map fills the screen, so its label sits inside the outline; other regions wear it outside, below when there is no room above.
   const labelInside = target === "world";
   const labelBelow = box.top < 34;
+  // A card in the side panel puts its label out on the map instead of over the panel's title.
+  const labelRight = target === "cards" && box.left + box.width + 150 < window.innerWidth;
   return (
     <div
       key={id}
@@ -317,6 +320,7 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
         width: box.width,
         height: box.height,
         border: "3px solid var(--c-accent)",
+        borderRadius: "var(--radius-md)",
         outline: "2px solid var(--c-surface)",
         pointerEvents: "none",
         zIndex: 55,
@@ -325,16 +329,23 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
       <span
         style={{
           position: "absolute",
-          ...(labelInside ? { left: "50%", bottom: 0, transform: "translateX(-50%)" } : { left: -3, ...(labelBelow ? { top: "100%" } : { bottom: "100%" }) }),
+          ...(labelInside
+            ? { left: "50%", bottom: 0, transform: "translateX(-50%)" }
+            : labelRight
+              ? { left: "100%", top: -3, marginLeft: 8 }
+              : { left: -3, ...(labelBelow ? { top: "100%" } : { bottom: "100%" }) }),
           background: "var(--c-accent)",
           color: "var(--c-on-accent)",
-          font: "700 13px/1 var(--font-mono)",
-          letterSpacing: "0.04em",
-          padding: "6px 8px",
+          font: "700 var(--fs-sm)/1 var(--font-text)",
+          padding: "6px 10px",
+          borderRadius: "var(--radius-xs)",
           whiteSpace: "nowrap",
         }}
       >
-        {step.badge} · {TARGET_LABEL[step.target].toUpperCase()}
+        <span className="ui-num" style={{ fontFamily: "var(--font-mono)" }}>
+          {step.badge}
+        </span>{" "}
+        · {TARGET_LABEL[step.target]}
       </span>
     </div>
   );
@@ -406,7 +417,7 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
             const done = i < state.index || finished;
             const now = i === state.index && !finished;
             return (
-              <span key={i} className="block h-2 flex-1 border border-line-strong" style={{ background: done ? "var(--c-accent)" : "transparent" }}>
+              <span key={i} className="block h-2 flex-1 overflow-hidden border border-line-strong" style={{ background: done ? "var(--c-accent)" : "transparent", borderRadius: "var(--radius-pill)" }}>
                 {now && !failed && <span key={step?.id} className="tour-fill block h-full" data-paused={paused || failed} style={{ background: "var(--c-ink)" }} />}
               </span>
             );
@@ -422,7 +433,7 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
             ) : (
               <>
                 <p className="flex flex-wrap items-center gap-2">
-                  <span className="ui-num" style={{ background: "var(--c-ink)", color: "var(--c-canvas)", padding: "2px 8px", fontWeight: 700, fontSize: "var(--fs-base)" }}>
+                  <span className="ui-num" style={{ background: "var(--c-ink)", color: "var(--c-canvas)", padding: "2px 8px", fontWeight: 700, fontSize: "var(--fs-base)", borderRadius: "var(--radius-xs)", fontFamily: "var(--font-mono)" }}>
                     {finished ? "DONE" : step?.badge}
                   </span>
                   <span className="ui-label">{finished ? "Demo complete" : step ? TARGET_LABEL[step.target] : ""}</span>

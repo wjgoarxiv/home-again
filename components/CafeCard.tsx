@@ -29,7 +29,7 @@ export type CardTravel = {
 };
 
 const STATUS_TEXT: Record<TripStatus, string> = {
-  idle: "Pick a way to go and your character heads there.",
+  idle: "Choose how to get there.",
   planning: "Planning the route…",
   travelling: "On the way",
   arrived: "Arrived",
@@ -108,11 +108,9 @@ export function CafeCard({
       </header>
 
       <div className="flex gap-3">
-        {card.photoUrl ? (
+        {card.photoUrl && (
           // eslint-disable-next-line @next/next/no-img-element -- Qloo-hosted photo, sized by the flex row
           <img src={card.photoUrl} alt={`${card.name}, photo from Qloo`} loading="lazy" className="h-20 w-20 shrink-0 border border-line object-cover" style={{ borderRadius: "var(--radius-sm)" }} />
-        ) : (
-          <div className="ui-pixel h-20 w-20 shrink-0 border border-line" style={{ borderRadius: "var(--radius-sm)" }} aria-hidden="true" />
         )}
         <div className="ui-stack ui-stack--tight min-w-0">
           {card.revisit && <span className="ui-tag ui-tag--accent self-start">♥ you loved this one · go back?</span>}
@@ -125,13 +123,8 @@ export function CafeCard({
         </div>
       </div>
 
-      <div className="ui-stack ui-stack--tight">
-        <span className="ui-label">shares taste with {seedName}</span>
-        <div className="flex flex-wrap gap-1">
-          {card.tasteLink.length > 0 ? card.tasteLink.map((t) => <span key={t} className="ui-tag ui-tag--accent-2">{t.toLowerCase()}</span>) : <span className="ui-meta">taste-affine on Qloo</span>}
-        </div>
-        <p className="ui-small ui-muted">{card.why}</p>
-        {card.unknowns.length > 0 && <p className="ui-meta">unverified: {card.unknowns.join(", ")}</p>}
+      <div className="flex flex-wrap gap-1">
+        {card.tasteLink.length > 0 ? card.tasteLink.map((t) => <span key={t} className="ui-tag ui-tag--accent-2">{t.toLowerCase()}</span>) : <span className="ui-meta">taste-affine on Qloo</span>}
       </div>
 
       {travel && <TravelSwitch travel={travel} />}
@@ -161,6 +154,12 @@ export function CafeCard({
           })}
         </div>
       </fieldset>
+
+      <div className="ui-stack ui-stack--tight">
+        <span className="ui-label">shares taste with {seedName}</span>
+        <p className="ui-small ui-muted">{card.why}</p>
+        {card.unknowns.length > 0 && <p className="ui-meta">unverified: {card.unknowns.join(", ")}</p>}
+      </div>
     </article>
   );
 }

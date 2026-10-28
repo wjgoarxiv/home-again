@@ -48,14 +48,14 @@ export function QlooPanel({
   return (
     <section
       className="ui-panel flex max-h-full min-h-0 flex-col"
-      style={{ "--panel-pad": "var(--sp-12)", boxShadow: "var(--shadow-overlay)" } as CSSProperties}
+      style={{ "--panel-pad": open ? "var(--sp-12)" : "var(--sp-8)", boxShadow: "var(--shadow-overlay)" } as CSSProperties}
       data-ui-moment="chart"
       data-tour="qloo"
       aria-label="Qloo request"
       aria-busy={loading}
     >
-      <button type="button" className="ui-panel__head min-h-11 w-full cursor-pointer border-0 text-left" style={{ marginBottom: open ? undefined : 0 }} aria-expanded={open} aria-controls="qloo-body" onClick={onToggle}>
-        <span className="ui-label">Qloo · wk {week}</span>
+      <button type="button" className="ui-panel__head min-h-11 w-full cursor-pointer border-0 text-left" style={{ marginBottom: open ? undefined : 0, alignItems: "center" }} aria-expanded={open} aria-controls="qloo-body" onClick={onToggle}>
+        <span className="ui-label">Qloo · week {week}</span>
         <span className="ui-coord">
           {summary} · {open ? "hide" : "show"}
         </span>
@@ -64,8 +64,8 @@ export function QlooPanel({
       {open && (
         <div id="qloo-body" className="ui-stack min-h-0 overflow-y-auto">
           {loading && (
-            <p className="ui-prompt ui-prompt--cursor ui-small" role="status">
-              querying v2/insights around {areaName}
+            <p className="ui-small" role="status">
+              Looking for cafés near {areaName}…
             </p>
           )}
 
@@ -121,7 +121,7 @@ export function QlooPanel({
                         <span className="ui-meta block truncate">
                           {i + 1} · {c.name}
                         </span>
-                        <span className="block h-3 border border-line-strong" aria-hidden="true">
+                        <span className="block h-3 overflow-hidden border border-line-strong" style={{ borderRadius: "var(--radius-pill)" }} aria-hidden="true">
                           <span className="block h-full" style={{ width: `${pct}%`, background: c.revisit ? "var(--c-accent)" : "var(--c-accent-2)" }} />
                         </span>
                       </span>

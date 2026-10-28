@@ -290,12 +290,14 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     );
   }
 
-  const submitRow = journey && cards.length > 0 && (
+  const submitRow = (hint: boolean) =>
+    journey &&
+    cards.length > 0 && (
     <div className="ui-stack ui-stack--tight">
       <button type="button" disabled={busy || feedback.length === 0} onClick={() => turn(journey, feedback)} className="ui-btn ui-btn--primary w-full">
         {journey.week === 3 ? "Finish the third week" : `Go to week ${journey.week + 1}`}
       </button>
-      <p className="ui-meta">Mark at least one café. Love the same one twice and it becomes your regular.</p>
+      <p className={hint ? "ui-meta [@media(max-height:820px)]:hidden" : "ui-meta hidden sm:block"}>Mark at least one café. Love the same one twice and it becomes your regular.</p>
     </div>
   );
 
@@ -311,10 +313,11 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   }
 
   const statusLine = journey ? `${journey.area.name} · radius ${radiusM} m · tower height = Qloo affinity · old regular ${journey.seed.name}${busy ? " · asking Qloo…" : ""}` : "";
+  const statusShort = journey ? `${journey.area.name.split(",")[0]} · radius ${radiusM} m${busy ? " · asking Qloo…" : ""}` : "";
 
   return (
     <main className="fixed inset-0 overflow-hidden" style={{ background: "var(--c-canvas)" }}>
-      <div data-stage data-tour="world" className="absolute inset-0">
+      <div data-stage data-tour="world" className="absolute inset-0 isolate">
         <World
           state={showStart ? idle : (journey ?? idle)}
           cards={showStart ? NO_CARDS : cards}
@@ -327,7 +330,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         />
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0" style={{ bottom: "var(--dock-h, 0px)" }}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10" style={{ bottom: "var(--dock-h, 0px)" }}>
         {showStart && (
           <div className="absolute inset-0 flex items-end justify-center p-3 sm:p-4 lg:items-start lg:justify-start lg:p-8">
             <section
@@ -345,7 +348,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
               ) : (
                 <>
                   <p className="ui-label">Home, again · Qloo hackathon 2026</p>
-                  <h1 className="ui-h1" style={{ fontSize: "var(--fs-3xl)", maxWidth: "24ch" }}>
+                  <h1 className="ui-h1" style={{ fontSize: "clamp(var(--fs-2xl), 6.4vw, var(--fs-3xl))", maxWidth: "24ch" }}>
                     Moved to New York? Find a café that feels like your old regular.
                   </h1>
                   <p className="ui-lead hidden md:block" style={{ fontSize: "var(--fs-base)", maxWidth: "56ch" }}>
@@ -359,11 +362,11 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                   </div>
                   <ol data-tour="intro" className="grid gap-2 sm:grid-cols-3" aria-label="How it works">
                     {EXPLAIN.map((e) => (
-                      <li key={e.n} className="ui-callout" style={{ padding: "var(--sp-12)" }}>
+                      <li key={e.n} className="ui-callout" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
                         <div className="flex items-center gap-3 sm:flex-col sm:items-start sm:gap-2">
                           <Glyph heights={[...e.heights]} accent={"accent" in e} />
                           <div className="min-w-0">
-                            <p className="ui-coord ui-num">{e.n}</p>
+                            <p className="ui-coord ui-num hidden sm:block">{e.n}</p>
                             <h2 className="ui-h4">{e.title}</h2>
                             <p className="ui-small">{e.text}</p>
                           </div>
@@ -393,18 +396,19 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
             <header className="ui-panel pointer-events-auto col-start-1 row-start-1 lg:col-span-3" style={{ "--panel-pad": "var(--sp-8)", boxShadow: "var(--shadow-overlay)" } as CSSProperties}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <span className="hidden sm:block">
-                  <span className="ui-brand">HOME, AGAIN</span>
+                  <span className="ui-brand">Home, again</span>
                 </span>
-                <div className="w-full min-w-0 sm:w-[340px]">
+                <div className="w-full min-w-0 sm:w-[300px] lg:w-[440px]">
                   <WeekStepper week={stage.week} wide={wide} />
                 </div>
                 <p className="ui-meta min-w-0 flex-1 truncate" title={statusLine} role="status">
-                  {statusLine}
+                  <span className="sm:hidden">{statusShort}</span>
+                  <span className="hidden sm:inline">{statusLine}</span>
                 </p>
               </div>
             </header>
 
-            <div className="pointer-events-auto row-start-2 min-h-0 lg:col-start-3 lg:row-start-2 lg:self-start" style={{ maxHeight: "100%" }}>
+            <div className="pointer-events-auto row-start-2 flex min-h-0 flex-col lg:col-start-3 lg:row-start-2 lg:self-start" style={{ maxHeight: "100%" }}>
               <QlooPanel
                 trace={trace}
                 cards={cards}
@@ -442,7 +446,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                 <header className="ui-panel__head">
                   <h2 className="ui-panel__title">Cafés near {stage.area.name.split(",")[0]}</h2>
                   <span className="ui-coord ui-num">
-                    wk {stage.week} · {cards.length}
+                    week {stage.week} · {cards.length}
                   </span>
                 </header>
                 <ul className="ui-stack ui-stack--tight min-h-0 flex-1 overflow-y-auto" style={{ "--stack-gap": "var(--sp-4)" } as CSSProperties}>
@@ -450,7 +454,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                     <li key={c.entityId}>{cardFor(c, i)}</li>
                   ))}
                 </ul>
-                <div className="pt-3">{submitRow}</div>
+                <div className="pt-3">{submitRow(true)}</div>
               </section>
             )}
 
@@ -515,7 +519,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                       {cards.map((c, i) => (c.entityId === activeId ? cardFor(c, i) : null))}
                       <p className="ui-meta mt-3">{QLOO_NOTE}</p>
                     </div>
-                    <div className="pt-3">{submitRow}</div>
+                    <div className="pt-3">{submitRow(false)}</div>
                   </>
                 )}
               </section>

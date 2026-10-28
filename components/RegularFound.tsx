@@ -51,7 +51,7 @@ export function RegularFound({
           Pick another café
         </button>
       </div>
-      <p className="ui-meta mt-3">Replay starts a fresh three weeks from {seedName} in the same neighbourhood. Pick another goes back to the start.</p>
+      <p className="ui-meta mt-3 hidden sm:block">Replay starts a fresh three weeks from {seedName} in the same neighbourhood. Pick another goes back to the start.</p>
     </section>
   );
 }
