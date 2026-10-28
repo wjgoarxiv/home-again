@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { haversineM } from "./geo";
 import type { Card, JourneyState } from "./schema";
-import { buildScene, cafeStatus, project, tasteRole, towerHeight } from "./world";
+import { buildScene, cafeStatus, compactLabel, fitScene, project, tasteRole, towerHeight } from "./world";
 
 const AREA = { name: "East Village, New York", lat: 40.726111111111, lng: -73.981388888889 };
 
@@ -239,5 +239,37 @@ describe("buildScene", () => {
   it("falls back to old city when the seed has no city", () => {
     const s = state({ seed: { id: "seed-1", name: "Fritz Coffee" } });
     expect(buildScene(s, [], {}).home.label).toBe("Fritz Coffee · old city");
+  });
+});
+
+describe("fitScene", () => {
+  it("frames the current ring with ~15% margin", () => {
+    const scene = buildScene(state({ week: 2 }), [], {});
+    expect(fitScene(scene)).toEqual({ cx: 0, cz: 0, halfSize: 28 * 1.15 });
+  });
+
+  it("expands to include towers beyond the current ring", () => {
+    const far = card({ entityId: "far", lat: AREA.lat + 0.02, lng: AREA.lng });
+    const scene = buildScene(state({ week: 3 }), [far], {});
+    const tower = scene.towers.find((t) => t.id === "far")!;
+    const extent = Math.max(Math.abs(tower.x), Math.abs(tower.z), 20);
+    expect(fitScene(scene).halfSize).toBeCloseTo(extent * 1.15, 6);
+  });
+
+  it("uses the widen ring when it is current", () => {
+    const scene = buildScene(state({ week: 1 }), [], {}, 1500);
+    expect(fitScene(scene).halfSize).toBeCloseTo(60 * 1.15, 6);
+  });
+});
+
+describe("compactLabel", () => {
+  it("shows short names in full with rounded distance", () => {
+    expect(compactLabel("Morning Plot", 320.4)).toBe("Morning Plot · 320M");
+  });
+
+  it("truncates long names to ~18 chars", () => {
+    const label = compactLabel("Fritz Coffee Company Dohwa", 610);
+    expect(label).toBe("Fritz Coffee Compa… · 610M");
+    expect(label.replace(" · 610M", "").length).toBeLessThanOrEqual(20);
   });
 });
