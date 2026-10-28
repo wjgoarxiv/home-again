@@ -59,7 +59,7 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
         {SEEDS.map((s) => {
           const pressed = looking && activeSeed === s.key;
           return (
-            <article key={s.key} className="ui-callout" style={{ minWidth: 0, alignContent: "start", gap: "var(--sp-8)" }}>
+            <article key={s.key} className="ui-callout" style={{ minWidth: 0, gridTemplateRows: "auto auto 1fr auto", gap: "var(--sp-8)" }}>
               <span className="ui-label">{s.city}</span>
               <h3 className="ui-h4" style={{ overflowWrap: "anywhere" }}>
                 {s.name}

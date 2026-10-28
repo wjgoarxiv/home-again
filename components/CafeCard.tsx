@@ -39,7 +39,7 @@ function TravelSwitch({ travel }: { travel: CardTravel }) {
   const { status, info } = travel;
   return (
     <div className="ui-stack ui-stack--tight">
-      <span className="ui-label">Go there</span>
+      <span className="ui-label hidden sm:block">Go there</span>
       <div className="ui-segmented w-full" role="group" aria-label="How to get there">
         {MODES.map((m) => (
           <button key={m.value} type="button" aria-pressed={travel.mode === m.value} className="flex-1 justify-center" style={{ minHeight: 44 }} onClick={() => travel.onMode(m.value)}>
@@ -98,7 +98,7 @@ export function CafeCard({
   }
 
   return (
-    <article id={`card-${card.entityId}`} className="ui-callout" style={{ outline: "2px solid var(--c-accent)", outlineOffset: "-2px", gap: "var(--sp-12)" }} onClick={onSelect}>
+    <article id={`card-${card.entityId}`} className="ui-callout" style={{ outline: "2px solid var(--c-accent)", outlineOffset: "-2px", gap: "var(--sp-12)", padding: "var(--sp-12)" }} onClick={onSelect}>
       <header className="flex items-start justify-between gap-3">
         <h3 className="ui-h4 min-w-0 break-words">
           <span className="ui-tag ui-num mr-2 align-middle">{index}</span>

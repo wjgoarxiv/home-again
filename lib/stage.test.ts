@@ -34,7 +34,7 @@ describe("formatTrip", () => {
 
 describe("travelReducer", () => {
   it("starts with nobody travelling and the automatic mode", () => {
-    expect(initialTravel).toEqual({ to: null, mode: "auto", resend: null, info: null, arrivedId: null });
+    expect(initialTravel).toEqual({ to: null, mode: "auto", resend: null, info: null, lastInfo: null, arrivedId: null });
   });
 
   it("go sets the destination and clears the old trip", () => {
@@ -81,6 +81,19 @@ describe("travelReducer", () => {
   it("trip null clears the info", () => {
     const s = run([{ type: "go", id: "a" }, { type: "trip", info: info("a") }, { type: "trip", info: null }]);
     expect(s.info).toBeNull();
+  });
+
+  it("keeps the finished trip's info once the world clears it on arrival", () => {
+    const s = run([{ type: "go", id: "a" }, { type: "trip", info: info("a") }, { type: "trip", info: null }, { type: "arrive", id: "a" }]);
+    expect(s).toMatchObject({ info: null, lastInfo: info("a"), arrivedId: "a" });
+  });
+
+  it("forgets the finished trip when another trip, a mode re-send or a new week starts", () => {
+    const done = run([{ type: "go", id: "a" }, { type: "trip", info: info("a") }, { type: "trip", info: null }, { type: "arrive", id: "a" }]);
+    expect(travelReducer(done, { type: "go", id: "b" }).lastInfo).toBeNull();
+    expect(travelReducer(done, { type: "clear" }).lastInfo).toBeNull();
+    const mid = run([{ type: "go", id: "a" }, { type: "trip", info: info("a") }, { type: "trip", info: null }]);
+    expect(travelReducer(mid, { type: "mode", mode: "bus" }).lastInfo).toBeNull();
   });
 
   it("arrive counts only for the café being travelled to", () => {

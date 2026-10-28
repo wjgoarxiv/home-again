@@ -27,10 +27,12 @@ export type TravelUi = {
   /** A café to send the character to again once `to` has been null for one render, so a mode change restarts the trip. */
   resend: string | null;
   info: TripInfo | null;
+  /** The trip that just ended: the world clears `info` on arrival, but the card still shows what the trip was. */
+  lastInfo: TripInfo | null;
   arrivedId: string | null;
 };
 
-export const initialTravel: TravelUi = { to: null, mode: "auto", resend: null, info: null, arrivedId: null };
+export const initialTravel: TravelUi = { to: null, mode: "auto", resend: null, info: null, lastInfo: null, arrivedId: null };
 
 export type TravelEvent =
   | { type: "go"; id: string }
@@ -44,15 +46,15 @@ export function travelReducer(state: TravelUi, event: TravelEvent): TravelUi {
   switch (event.type) {
     case "go":
       if (state.to === event.id) return state;
-      return { ...state, to: event.id, resend: null, info: null, arrivedId: null };
+      return { ...state, to: event.id, resend: null, info: null, lastInfo: null, arrivedId: null };
     case "mode":
       if (state.mode === event.mode) return state;
       if (state.to === null || state.arrivedId === state.to) return { ...state, mode: event.mode };
-      return { ...state, mode: event.mode, to: null, resend: state.to, info: null, arrivedId: null };
+      return { ...state, mode: event.mode, to: null, resend: state.to, info: null, lastInfo: null, arrivedId: null };
     case "resent":
       return state.resend === null ? state : { ...state, to: state.resend, resend: null };
     case "trip": {
-      if (event.info === null) return state.info === null ? state : { ...state, info: null };
+      if (event.info === null) return state.info === null ? state : { ...state, info: null, lastInfo: state.info };
       return event.info.id === (state.to ?? state.resend) ? { ...state, info: event.info } : state;
     }
     case "arrive":

@@ -93,6 +93,28 @@ function useCompact(): boolean {
   return compact;
 }
 
+/** A ref callback that reports `measure(element)` now and whenever the element resizes (0 while it is not mounted). */
+function useMeasured(measure: (el: HTMLElement) => number): [number, (el: HTMLElement | null) => void] {
+  const [value, setValue] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback(
+    (el: HTMLElement | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      if (!el) return setValue(0);
+      setValue(measure(el));
+      if (typeof ResizeObserver === "undefined") return;
+      observer.current = new ResizeObserver(() => setValue(measure(el)));
+      observer.current.observe(el);
+    },
+    [measure],
+  );
+  return [value, ref];
+}
+
+const barBottom = (el: HTMLElement) => Math.round(el.getBoundingClientRect().bottom);
+const outerHeight = (el: HTMLElement) => el.offsetHeight;
+
 export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend }) {
   const [journey, setJourney] = useState<JourneyState | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
@@ -109,6 +131,9 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   const [travel, dispatchTravel] = useReducer(travelReducer, initialTravel);
   const compact = useCompact();
   const [userPanels, setUserPanels] = useState<Panels>(() => initialPanels(false));
+  const [barInset, barRef] = useMeasured(barBottom);
+  const [sheetHeight, sheetRef] = useMeasured(outerHeight);
+  const [qlooBottom, qlooRef] = useMeasured(barBottom);
   const inflight = useRef(false);
   const dragFrom = useRef<number | null>(null);
   const dragged = useRef(false);
@@ -252,16 +277,6 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
 
   // The start view shows the example neighbourhood, empty, behind the welcome card.
   const idle = useMemo(() => startJourney({ id: "example-seed", name: EXAMPLE.name, city: EXAMPLE.city }, EXAMPLE.area), []);
-  // Props the world takes beyond its current typings (travel, full-bleed); spread so this compiles before and after they land.
-  const worldExtra: {
-    focusId?: string;
-    fullBleed: true;
-    travelTo: string | null;
-    travelMode: TravelChoice;
-    onArrive: (id: string) => void;
-    onTrip: (info: TripInfo | null) => void;
-  } = { focusId, fullBleed: true, travelTo: travel.to, travelMode: travel.mode, onArrive, onTrip };
-
   // Keep the chosen café in view inside its own scrolling panel (the page itself never scrolls).
   useEffect(() => {
     if (activeId) document.getElementById(`card-${activeId}`)?.scrollIntoView({ block: "nearest" });
@@ -271,7 +286,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     const id = c.entityId;
     const selected = activeId === id;
     const cardTravel: CardTravel | undefined = selected
-      ? { mode: travel.mode, status: tripStatus(travel, id), info: travel.info?.id === id ? travel.info : null, onMode: (m) => chooseMode(m, id) }
+      ? { mode: travel.mode, status: tripStatus(travel, id), info: travel.info?.id === id ? travel.info : travel.lastInfo?.id === id ? travel.lastInfo : null, onMode: (m) => chooseMode(m, id) }
       : undefined;
     return (
       <CafeCard
@@ -317,7 +332,12 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
 
   return (
     <main className="fixed inset-0 overflow-hidden" style={{ background: "var(--c-canvas)" }}>
-      <div data-stage data-tour="world" className="absolute inset-0 isolate">
+      <div
+        data-stage
+        data-tour="world"
+        className="absolute inset-0 isolate"
+        style={{ "--stage-inset-bottom": `calc(var(--dock-h, 0px) + ${compact && !panels.sheetOpen && sheetHeight ? sheetHeight + 12 : 0}px)` } as CSSProperties}
+      >
         <World
           state={showStart ? idle : (journey ?? idle)}
           cards={showStart ? NO_CARDS : cards}
@@ -326,7 +346,13 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
           onSelect={select}
           radiusM={showStart ? 1000 : radiusM}
           loading={busy}
-          {...worldExtra}
+          focusId={focusId}
+          travelTo={travel.to}
+          travelMode={travel.mode}
+          onArrive={onArrive}
+          onTrip={onTrip}
+          fullBleed
+          insetTop={stage ? (compact && qlooBottom && !panels.qlooOpen ? qlooBottom : barInset) : 0}
         />
       </div>
 
@@ -334,7 +360,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         {showStart && (
           <div className="absolute inset-0 flex items-end justify-center p-3 sm:p-4 lg:items-start lg:justify-start lg:p-8">
             <section
-              className={`ui-panel pointer-events-auto flex max-h-full w-full flex-col overflow-y-auto ${formOpen ? "lg:max-w-[700px]" : "lg:max-w-[580px]"}`}
+              className={`ui-panel pointer-events-auto flex max-h-[min(66dvh,100%)] w-full flex-col overflow-y-auto lg:max-h-full ${formOpen ? "lg:max-w-[700px]" : "lg:max-w-[580px]"}`}
               style={{ "--panel-pad": "var(--sp-20)", boxShadow: "var(--shadow-overlay)", rowGap: "var(--sp-16)" } as CSSProperties}
               aria-busy={busy}
             >
@@ -392,8 +418,8 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         )}
 
         {stage && (
-          <div className="absolute inset-0 grid grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3 p-3 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)_minmax(0,320px)] lg:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)_minmax(0,360px)]">
-            <header className="ui-panel pointer-events-auto col-start-1 row-start-1 lg:col-span-3" style={{ "--panel-pad": "var(--sp-8)", boxShadow: "var(--shadow-overlay)" } as CSSProperties}>
+          <div className="absolute inset-0 grid grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3 p-3 lg:pb-11 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)_minmax(0,320px)] lg:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)_minmax(0,360px)]">
+            <header ref={barRef} className="ui-panel pointer-events-auto col-start-1 row-start-1 lg:col-span-3" style={{ "--panel-pad": "var(--sp-8)", boxShadow: "var(--shadow-overlay)" } as CSSProperties}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <span className="hidden sm:block">
                   <span className="ui-brand">Home, again</span>
@@ -408,7 +434,11 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
               </div>
             </header>
 
-            <div className="pointer-events-auto row-start-2 flex min-h-0 flex-col lg:col-start-3 lg:row-start-2 lg:self-start" style={{ maxHeight: "100%" }}>
+            <div
+              ref={qlooRef}
+              className={`pointer-events-auto row-start-2 min-h-0 flex-col lg:col-start-3 lg:row-start-2 lg:self-start ${compact && panels.sheetOpen && !panels.qlooOpen ? "hidden" : "flex"}`}
+              style={{ maxHeight: "100%" }}
+            >
               <QlooPanel
                 trace={trace}
                 cards={cards}
@@ -459,7 +489,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
             )}
 
             {!stage.done && cards.length > 0 && compact && (
-              <section data-tour="cards" className="ui-panel pointer-events-auto row-start-4 flex min-h-0 flex-col" style={{ ...FLOAT, maxHeight: "min(60dvh, 100%)" }} aria-label="Cafés" aria-busy={busy}>
+              <section ref={sheetRef} data-tour="cards" className="ui-panel pointer-events-auto row-start-4 flex min-h-0 flex-col" style={{ ...FLOAT, maxHeight: "min(60dvh, 100%)" }} aria-label="Cafés" aria-busy={busy}>
                 <button
                   type="button"
                   className="-mx-1 flex w-full flex-col items-stretch gap-1 border-0 bg-transparent p-0 text-left"
