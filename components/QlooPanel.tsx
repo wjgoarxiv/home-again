@@ -42,7 +42,7 @@ export function QlooPanel({ trace, cards, areaName, week, loading }: { trace: Tr
           <dt className="ui-label">taste signal</dt>
           <dd className="flex flex-wrap gap-1">
             {trace.signal.map((s, i) => (
-              <span key={s.id} className={`ui-tag ${i === 0 ? "ui-tag--accent-2" : "ui-tag--accent"}`}>
+              <span key={s.id} className={`ui-tag ${i === 0 ? "ui-tag--accent-2" : "ui-tag--accent"}`} style={{ whiteSpace: "normal" }}>
                 {i === 0 ? "old · " : "♥ "}
                 {s.name}
               </span>
@@ -55,7 +55,7 @@ export function QlooPanel({ trace, cards, areaName, week, loading }: { trace: Tr
               <span className="ui-meta">none yet</span>
             ) : (
               trace.exclude.map((e) => (
-                <span key={e.id} className={`ui-tag ${e.reason === "rejected" ? "ui-tag--negative" : e.reason === "crowded" ? "ui-tag--warning" : ""}`}>
+                <span key={e.id} className={`ui-tag ${e.reason === "rejected" ? "ui-tag--negative" : e.reason === "crowded" ? "ui-tag--warning" : ""}`} style={{ whiteSpace: "normal" }}>
                   {e.name ?? "café"} · {REASON[e.reason]}
                 </span>
               ))
