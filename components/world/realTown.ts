@@ -254,7 +254,9 @@ export function streetsForLife(snapshot: GeoSnapshot): Street[] {
       flush();
     }
   }
-  return out;
+  // Life hands cars out to streets in order, so central streets go first or every car ends up off screen.
+  const mid = (st: Street) => Math.hypot(st.dir === "x" ? st.x + st.length / 2 : st.x, st.dir === "z" ? st.z + st.length / 2 : st.z);
+  return out.sort((a, b) => mid(a) - mid(b));
 }
 
 /** One SVG path (scene units) of every footprint outline, for the flat map. */
@@ -457,6 +459,7 @@ export type RealTown = {
   group: THREE.Group;
   buildingMesh: THREE.Mesh;
   flatMesh: THREE.Mesh;
+  /** The central main streets the life layer drives on (short alleys hidden between buildings are left out). */
   streets: Street[];
   drawCalls: number;
   /** Cheap per-turn change: hides buildings under the cafes, lowers neighbours, keeps ring bands readable. */
@@ -464,6 +467,9 @@ export type RealTown = {
   stats: () => { buildings: number; triangles: number };
   dispose: () => void;
 };
+
+const LIFE_MIN_UNITS = 8;
+const LIFE_STREETS = 30;
 
 export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts: SceneOpts = {}): RealTown {
   const buildings = sceneBuildings(snapshot, opts);
@@ -520,7 +526,7 @@ export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts
     group,
     buildingMesh,
     flatMesh,
-    streets: streetsForLife(snapshot),
+    streets: streetsForLife(snapshot).filter((st) => st.length >= LIFE_MIN_UNITS).slice(0, LIFE_STREETS),
     drawCalls: 2,
     update,
     stats: () => ({

@@ -142,6 +142,14 @@ describe("streetsForLife", () => {
     expect(streetsForLife(s).filter((st) => st.dir === "z")).toHaveLength(2);
   });
 
+  it("lists central streets first so a few cars land where the camera looks", () => {
+    const s = snap([], [line(1, -60, 40, 60, 40), line(1, -10, 3, 10, 3), line(1, -30, -20, 30, -20)]);
+    const mid = (st: { x: number; z: number; dir: "x" | "z"; length: number }) =>
+      Math.hypot(st.dir === "x" ? st.x + st.length / 2 : st.x, st.dir === "z" ? st.z + st.length / 2 : st.z);
+    const order = streetsForLife(s).map(mid);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
   it("ignores diagonals and clamps lanes to 1-2", () => {
     const s = snap([], [line(4, 0, 0, 10, 10), line(4, 0, 0, 20, 0), line(0, 0, 8, 20, 8)]);
     const streets = streetsForLife(s);
