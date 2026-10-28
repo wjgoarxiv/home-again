@@ -1,0 +1,51 @@
+{
+  "success": true,
+  "results": {
+    "entities": [
+      {
+        "name": "Test Roasters",
+        "entity_id": "TEST-0001",
+        "type": "urn:entity:place",
+        "subtype": "urn:entity:place",
+        "location": { "lat": 40.7275, "lon": -73.9850, "geohash": "dr5rsp" },
+        "properties": { "address": "1 Example St, New York, NY", "neighborhood": "Example Village" },
+        "popularity": 0.8,
+        "query": { "affinity": 0.91, "distance": 320.5, "measurements": { "audience_growth": 0.1 } },
+        "tags": [
+          { "id": "urn:tag:genre:place:restaurant:coffee_shop", "name": "Coffee Shop", "type": "urn:tag:genre:place", "weight": null },
+          { "id": "urn:tag:offerings:place:espresso", "name": "Espresso", "type": "urn:tag:offerings:place", "weight": null },
+          { "id": "urn:tag:beverage_offering:qloo:light_roast", "name": "Light Roast", "type": "urn:tag:beverage_offering:qloo", "weight": null },
+          { "id": "urn:tag:decor:qloo:minimalist", "name": "Minimalist", "type": "urn:tag:decor:qloo", "weight": null },
+          { "id": "urn:tag:decor:qloo:minimalist", "name": "Minimalist", "type": "urn:tag:decor:qloo", "weight": null },
+          { "id": "urn:tag:payments:place:credit_card", "name": "Credit Card", "type": "urn:tag:payments:place", "weight": null },
+          { "id": "urn:tag:customer_identity:qloo:example", "name": "Example Crowd", "type": "urn:tag:customer_identity:qloo", "weight": null }
+        ]
+      },
+      {
+        "name": "Sample Coffee Bar",
+        "entity_id": "TEST-0002",
+        "type": "urn:entity:place",
+        "location": { "lat": 40.7300, "lon": -73.9790 },
+        "properties": { "address": "2 Example Ave, New York, NY" },
+        "query": { "affinity": 0.77 },
+        "tags": [
+          { "id": "urn:tag:genre:place:restaurant:coffee_shop", "name": "Coffee Shop", "type": "urn:tag:genre:place", "weight": null },
+          { "id": "urn:tag:offerings:place:pour_over", "name": "Pour Over", "type": "urn:tag:offerings:place", "weight": null }
+        ]
+      },
+      {
+        "name": "Far Away Cafe",
+        "entity_id": "TEST-0003",
+        "type": "urn:entity:place",
+        "location": { "lat": 40.7600, "lon": -73.9814 },
+        "query": { "affinity": 0.95 },
+        "tags": [{ "id": "urn:tag:ambience:qloo:cozy", "name": "Cozy", "type": "urn:tag:ambience:qloo", "weight": null }]
+      },
+      {
+        "name": "Broken Entry Without Location",
+        "entity_id": "TEST-0004",
+        "type": "urn:entity:place"
+      }
+    ]
+  }
+}
