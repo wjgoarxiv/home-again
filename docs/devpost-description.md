@@ -1,7 +1,7 @@
 # Devpost description (draft)
 
-- Hosted demo: TODO (Vercel URL after T9)
-- Repository: https://github.com/wjgoarxiv/home-again (TODO: confirm after push)
+- Hosted demo: https://home-again-gamma.vercel.app
+- Repository: https://github.com/wjgoarxiv/home-again
 - License: MIT
 
 ## Inspiration
