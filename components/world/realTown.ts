@@ -277,8 +277,15 @@ export const ROAD_LANE_W = 0.2;
 const SIDEWALK_EXTRA = 0.3;
 const GROUND_HALF = 64;
 const Y_SIDEWALK = 0.015;
+const Y_KERB = 0.022;
 const Y_ROAD = 0.03;
 const Y_MARK = 0.045;
+/** Ink line widths in scene units (about 2 px at the overview zoom): roof rim, vertical corner, kerb either side of a road. */
+const RIM_W = 0.11;
+const CORNER_W = 0.07;
+const KERB_W = 0.07;
+/** Wall base colour factor: a soft ground-contact shade so tall blocks stand on the street instead of floating. */
+const BASE_SHADE = 0.88;
 
 class Mesh {
   pos: number[] = [];
@@ -335,6 +342,7 @@ function buildFlat(snapshot: GeoSnapshot, p: WorldPalette): THREE.BufferGeometry
   const side = new THREE.Color(p.sidewalk);
   const road = new THREE.Color(p.road);
   const mark = new THREE.Color(p.marking);
+  const kerb = new THREE.Color(p.outline).lerp(road, 0.35);
   const h = GROUND_HALF;
   const slab = 0.5;
   const t = [m.vert(-h, 0, -h, 0, 1, 0, ground), m.vert(h, 0, -h, 0, 1, 0, ground), m.vert(h, 0, h, 0, 1, 0, ground), m.vert(-h, 0, h, 0, 1, 0, ground)];
@@ -350,7 +358,7 @@ function buildFlat(snapshot: GeoSnapshot, p: WorldPalette): THREE.BufferGeometry
   wall(-h, -h, -h, h, -1, 0);
 
   const inside = (x: number, z: number) => Math.abs(x) < h && Math.abs(z) < h;
-  for (const pass of ["side", "road", "mark"] as const) {
+  for (const pass of ["side", "kerb", "road", "mark"] as const) {
     for (const s of snapshot.streets) {
       const w = ROAD_BASE_W + ROAD_LANE_W * Math.min(4, Math.max(1, s.l));
       for (let i = 2; i < s.p.length; i += 2) {
@@ -358,6 +366,7 @@ function buildFlat(snapshot: GeoSnapshot, p: WorldPalette): THREE.BufferGeometry
         const x2 = s.p[i] / DM_PER_UNIT, z2 = s.p[i + 1] / DM_PER_UNIT;
         if (!inside(x1, z1) || !inside(x2, z2)) continue;
         if (pass === "side") flatQuad(m, x1, z1, x2, z2, w + SIDEWALK_EXTRA, (w + SIDEWALK_EXTRA) / 2, Y_SIDEWALK, side);
+        else if (pass === "kerb") flatQuad(m, x1, z1, x2, z2, w + KERB_W * 2, w / 2 + KERB_W, Y_KERB, kerb);
         else if (pass === "road") flatQuad(m, x1, z1, x2, z2, w, w / 2, Y_ROAD, road);
         else if (s.l >= 2) {
           const deg = (Math.atan2(Math.abs(z2 - z1), Math.abs(x2 - x1)) * 180) / Math.PI;
@@ -384,6 +393,8 @@ function addBuilding(m: Mesh, b: SceneBuilding, p: WorldPalette): Span {
   const band = Math.floor(b.h / 1.5);
   const wallCol = new THREE.Color(p.facades[hash(b.id, band) % p.facades.length]);
   const roofCol = new THREE.Color(p.roofs[hash(b.id, 3) % p.roofs.length]);
+  const wallFoot = wallCol.clone().multiplyScalar(BASE_SHADE);
+  const ink = new THREE.Color(p.outline);
   const top = b.h;
 
   // Roof: triangulate the footprint (with holes); every triangle is wound to face up.
@@ -421,9 +432,21 @@ function addBuilding(m: Mesh, b: SceneBuilding, p: WorldPalette): Span {
       const len = Math.hypot(dx, dz);
       if (len < 1e-4) continue;
       const nx = (dz / len) * sign, nz = (-dx / len) * sign;
-      const a = m.vert(x1, 0, z1, nx, 0, nz, wallCol), c = m.vert(x2, 0, z2, nx, 0, nz, wallCol);
+      const a = m.vert(x1, 0, z1, nx, 0, nz, wallFoot), c = m.vert(x2, 0, z2, nx, 0, nz, wallFoot);
       const d = m.vert(x2, top, z2, nx, 0, nz, wallCol), e = m.vert(x1, top, z1, nx, 0, nz, wallCol);
       m.quad(a, c, d, e, nx, 0, nz);
+      // Ink: a vertical strip on the wall's start corner and a rim along the roof edge, both pulled in from the wall's ends.
+      const ux = dx / len, uz = dz / len;
+      const cw = Math.min(CORNER_W, len * 0.3), rw = Math.min(RIM_W, len * 0.4);
+      const o = 0.004;
+      const sa = m.vert(x1 + nx * o, 0, z1 + nz * o, nx, 0, nz, ink), sb = m.vert(x1 + nx * o + ux * cw, 0, z1 + nz * o + uz * cw, nx, 0, nz, ink);
+      const sc = m.vert(x1 + nx * o + ux * cw, top, z1 + nz * o + uz * cw, nx, 0, nz, ink), sd = m.vert(x1 + nx * o, top, z1 + nz * o, nx, 0, nz, ink);
+      m.quad(sa, sb, sc, sd, nx, 0, nz);
+      // rim lies on the roof, running inward from the edge (inward = against the wall normal)
+      const iy = top + 0.012;
+      const r0 = m.vert(x1, iy, z1, 0, 1, 0, ink), r1 = m.vert(x2, iy, z2, 0, 1, 0, ink);
+      const r2 = m.vert(x2 - nx * rw, iy, z2 - nz * rw, 0, 1, 0, ink), r3 = m.vert(x1 - nx * rw, iy, z1 - nz * rw, 0, 1, 0, ink);
+      m.quad(r0, r1, r2, r3, 0, 1, 0);
     }
   });
   span.vWall = m.pos.length / 3;

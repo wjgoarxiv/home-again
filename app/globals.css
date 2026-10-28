@@ -59,6 +59,7 @@
   --w-pants: #3f4a63, #5c6b7f, #6b5a4c, #2f3a4a;
   --w-avatar: #ff7a59;
   --w-home: #3b69d4;
+  --w-outline: #4b4466;
 }
 
 @media (prefers-reduced-motion: reduce) {

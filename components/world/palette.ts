@@ -38,6 +38,8 @@ export type WorldPalette = {
   /** The user's own character and their home marker. */
   avatar: string;
   home: string;
+  /** Ink for edge lines: roof rims, building corners, kerbs, tower hulls. A deep plum so lines stay friendly. */
+  outline: string;
 };
 
 export const FALLBACK_PALETTE: WorldPalette = {
@@ -71,6 +73,7 @@ export const FALLBACK_PALETTE: WorldPalette = {
   pants: ["#3f4a63", "#5c6b7f", "#6b5a4c", "#2f3a4a"],
   avatar: "#ff7a59",
   home: "#3b69d4",
+  outline: "#4b4466",
 };
 
 const LIST_KEYS = ["leaf", "facades", "roofs", "awning", "cars", "people", "skin", "shirts", "pants"] as const;

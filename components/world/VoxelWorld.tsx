@@ -46,6 +46,8 @@ type Label = { id: string; n: number; name: string; distanceM: number; left: num
 const VOX = 1.8;
 const VOX_H = 1;
 const LOT_Y = 0.22;
+/** How much the ink hull outgrows a tower voxel (scene units, both sides together). */
+const HULL_W = 0.2;
 /** The newcomer's home: where the character starts, a little house on the area centre. */
 const HOME_CLEAR = 2.2;
 const HOME_PAD = 3.2;
@@ -930,6 +932,11 @@ export default function VoxelWorld({
       if (total === 0) return;
       const mesh = boxMesh(total, "#ffffff");
       mesh.userData.layer = "towers";
+      // Ink hull: the same boxes grown a little, drawn back-faces only in the outline colour, so every tower gets a bold silhouette.
+      const hull = boxMesh(total, world.outline);
+      hull.userData.layer = "towers";
+      (hull.material as THREE.Material).dispose();
+      hull.material = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide });
       let i = 0;
       for (const tower of scene.towers) {
         const spec = targets.get(tower.id);
@@ -939,10 +946,12 @@ export default function VoxelWorld({
         st.bases.set(tower.id, base);
         for (let v = 0; v < n; v++) {
           place(mesh, i, tower.x, base + v * VOX_H + VOX_H / 2, tower.z, VOX, VOX_H, VOX, spec.colors[Math.min(v, spec.colors.length - 1)] ?? palette.ink2);
+          place(hull, i, tower.x, base + v * VOX_H + VOX_H / 2, tower.z, VOX + HULL_W, VOX_H + HULL_W, VOX + HULL_W, world.outline);
           i++;
         }
         if (spec.marker && n > 0) {
           place(mesh, i, tower.x, base + n * VOX_H + VOX_H / 2, tower.z, VOX * 0.55, VOX_H, VOX * 0.55, palette.accent2);
+          place(hull, i, tower.x, base + n * VOX_H + VOX_H / 2, tower.z, VOX * 0.55 + HULL_W, VOX_H + HULL_W, VOX * 0.55 + HULL_W, world.outline);
           i++;
         }
         st.tops.set(tower.id, base + Math.max(n, 1) * VOX_H + (spec.marker && n > 0 ? VOX_H : 0));
@@ -950,7 +959,10 @@ export default function VoxelWorld({
       mesh.count = i;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      content.add(mesh);
+      hull.count = i;
+      hull.instanceMatrix.needsUpdate = true;
+      if (hull.instanceColor) hull.instanceColor.needsUpdate = true;
+      content.add(hull, mesh);
     };
 
     const finalCounts = new Map<string, number>();
