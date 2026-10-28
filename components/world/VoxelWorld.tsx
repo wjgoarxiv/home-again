@@ -7,6 +7,9 @@ import type { Scene, Tower } from "../../lib/world";
 import { buildTown, planTown, seedFromString, type TownCafe, type TownPalette } from "./town";
 import { createLife, type LifeHandle } from "./life";
 import type { Street } from "../../lib/life";
+import type { GeoSnapshot } from "../../lib/geomap";
+import { worldPalette, type WorldPalette } from "./palette";
+import { buildRealTown, type CafeSpot, type RealTown } from "./realTown";
 
 export type VoxelWorldProps = {
   scene: Scene;
@@ -14,26 +17,25 @@ export type VoxelWorldProps = {
   onSelect: (id: string) => void;
   loading: boolean;
   onReady?: () => void;
+  /** Real NYC footprints and streets for this area; null/undefined = procedural town. */
+  geo?: GeoSnapshot | null;
+  /** Tour focus: the camera steps to this tower. null/undefined = the finale tower (if any) or normal framing. */
+  focusId?: string | null;
 };
 
 type Palette = {
   accent: string;
   accent2: string;
   support: string;
-  supportInk: string;
   ink2: string;
   line: string;
   lineStrong: string;
-  accentWash: string;
-  surface: string;
-  sunken: string;
 };
 
 type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number };
 
 const VOX = 1.8;
 const VOX_H = 1;
-const GREY = "#8b8e89";
 const LOT_Y = 0.22;
 
 function readPalette(): Palette {
@@ -45,41 +47,38 @@ function readPalette(): Palette {
     accent: css("--c-accent", "#c8370c"),
     accent2: css("--c-accent-2", "#1559b8"),
     support: css("--c-support", "#cfe6c7"),
-    supportInk: css("--c-support-ink", "#1d4a17"),
     ink2: css("--c-ink-2", "#2f322f"),
     line: css("--c-line", "#c3c5bf"),
     lineStrong: css("--c-line-strong", "#3a3d3a"),
-    accentWash: css("--c-accent-wash", "#f3dccf"),
-    surface: css("--c-surface", "#f4f4f1"),
-    sunken: css("--c-sunken", "#dadbd6"),
   };
 }
 
-function townPalette(p: Palette): TownPalette {
+/** The procedural town's fallback colours, all from the world palette. */
+function townPalette(w: WorldPalette): TownPalette {
   return {
-    base: p.sunken,
-    road: "#262926",
-    marking: "#e6e7e0",
-    cross: "#d8d9d2",
-    side: p.surface,
-    grass: p.support,
-    path: p.ink2,
-    wallA: p.surface,
-    wallB: p.lineStrong,
-    brick: p.accentWash,
-    roof: p.line,
-    detail: p.line,
-    store: p.support,
-    windowDark: "#161a15",
-    windowLitA: p.accent2,
-    windowLitB: p.accent,
-    trunk: "#4a3f33",
-    canopy: p.supportInk,
-    pole: p.line,
-    lampHead: p.accent2,
-    bench: p.line,
-    signalA: "#b0131a",
-    signalB: "#1d6b2c",
+    base: w.ground,
+    road: w.road,
+    marking: w.marking,
+    cross: w.crossing,
+    side: w.sidewalk,
+    grass: w.park,
+    path: w.sidewalk,
+    wallA: w.facades[0],
+    wallB: w.facades[3 % w.facades.length],
+    brick: w.facades[1 % w.facades.length],
+    roof: w.roofs[0],
+    detail: w.roofs[1 % w.roofs.length],
+    store: w.awning[0],
+    windowDark: w.glass,
+    windowLitA: w.litWindow,
+    windowLitB: w.awning[3 % w.awning.length],
+    trunk: w.trunk,
+    canopy: w.leaf[0],
+    pole: w.roofs[2 % w.roofs.length],
+    lampHead: w.litWindow,
+    bench: w.trunk,
+    signalA: w.signalRed,
+    signalB: w.signalGreen,
   };
 }
 
@@ -104,13 +103,13 @@ function towerVoxels(
   palette: Palette,
 ): { count: number; colors: string[]; marker: boolean } {
   const marker = tower.status === "revisit";
-  if (tower.status === "rejected") return { count: 1, colors: [GREY], marker: false };
+  if (tower.status === "rejected") return { count: 1, colors: [palette.lineStrong], marker: false };
   const count =
     tower.status === "crowded" ? Math.max(1, Math.floor(tower.height / 2)) : tower.height;
   const colors: string[] = [];
   for (let i = 0; i < count; i++) {
     if (tower.status === "loved" || tower.status === "revisit") colors.push(palette.accent);
-    else if (tower.status === "crowded") colors.push(GREY);
+    else if (tower.status === "crowded") colors.push(palette.lineStrong);
     else if (tower.status === "seen") colors.push(palette.ink2);
     else colors.push(i === count - 1 ? roleColor(tower, palette) : palette.ink2);
   }
@@ -150,7 +149,8 @@ function place(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: nu
   mesh.setColorAt(i, new THREE.Color(color));
 }
 
-export default function VoxelWorld({ scene, selectedId, onSelect, loading, onReady }: VoxelWorldProps) {
+export default function VoxelWorld({ scene, selectedId, onSelect, loading, onReady, geo = null, focusId: focusProp = null }: VoxelWorldProps) {
+  const focusId = focusProp ?? scene.focusId;
   const containerRef = useRef<HTMLDivElement>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -185,6 +185,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     stepTimers: number[];
     prevCounts: Map<string, number>;
     palette: Palette;
+    world: WorldPalette;
+    realTown: RealTown | null;
+    proc: THREE.Group | null;
+    lifeStreets: Street[] | null;
     pointers: Map<number, { x: number; y: number }>;
     pinchDist: number | null;
     fitHalf: number;
@@ -205,9 +209,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     const container = containerRef.current;
     if (!container) return;
     const palette = readPalette();
+    const world = worldPalette();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setClearColor(new THREE.Color(palette.sunken));
+    renderer.setClearColor(new THREE.Color(world.sky));
     container.appendChild(renderer.domElement);
     Object.assign(renderer.domElement.style, {
       position: "absolute",
@@ -220,8 +225,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     });
 
     const root = new THREE.Scene();
-    root.add(new THREE.AmbientLight(0xffffff, 0.75));
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
+    root.add(new THREE.AmbientLight(0xffffff, 1.5));
+    const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(60, 120, 20);
     root.add(key);
 
@@ -242,6 +247,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       stepTimers: [] as number[],
       prevCounts: new Map<string, number>(),
       palette,
+      world,
+      realTown: null as RealTown | null,
+      proc: null as THREE.Group | null,
+      lifeStreets: null as Street[] | null,
       pointers: new Map<number, { x: number; y: number }>(),
       pinchDist: null as number | null,
       fitHalf: 46,
@@ -283,6 +292,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       camera.updateProjectionMatrix();
       renderer.render(root, camera);
       container.dataset.draws = String(renderer.info.render.calls);
+      container.dataset.tris = String(renderer.info.render.triangles);
       updateLabels();
     };
 
@@ -345,13 +355,14 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     const setupLife = () => {
       if (st.reduced) return;
       const bucket = densityOf();
-      if (st.life && bucket === st.densityBucket) return;
+      if (st.life && bucket === st.densityBucket && st.lifeStreets === st.streets) return;
       if (st.life) {
         st.life.dispose();
         st.life = null;
       }
       stopLoop();
       st.densityBucket = bucket;
+      st.lifeStreets = st.streets;
       if (!threeRef.current) return;
       const current = sceneRef.current;
       st.life = createLife({
@@ -360,12 +371,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         spots: current.towers.map((t) => ({ id: t.id, x: t.x, z: t.z, height: t.height })),
         seed: seedFromString(current.home.label),
         density: bucket,
-        palette: {
-          car: [palette.accent, palette.accent2, "#5a5e5a"],
-          person: [palette.ink2, "#6b6e6a", palette.support],
-          steam: "#ffffff",
-          bird: palette.ink2,
-        },
+        palette: { car: world.cars, person: world.people, steam: world.steam, bird: world.bird },
       });
       if (st.visible && !document.hidden) startLoop();
     };
@@ -500,11 +506,30 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     };
   }, []);
 
+  // The real town is built once per area (geo changes), never per turn.
+  useEffect(() => {
+    const st = threeRef.current;
+    if (!st) return;
+    if (!geo) {
+      st.realTown = null;
+      return;
+    }
+    const town = buildRealTown(geo, st.world);
+    st.root.add(town.group);
+    st.realTown = town;
+    st.streets = town.streets;
+    return () => {
+      st.root.remove(town.group);
+      town.dispose();
+      if (st.realTown === town) st.realTown = null;
+    };
+  }, [geo]);
+
   useEffect(() => {
     const st = threeRef.current;
     if (!st) return;
     const renderNow = () => (threeRef.current as unknown as { render: () => void }).render();
-    const { palette } = st;
+    const { palette, world } = st;
 
     const fit = fitScene(scene);
     const fitKey = fit.halfSize.toFixed(2);
@@ -516,12 +541,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       st.applyFit();
     }
 
-    const focusId = scene.focusId ?? null;
     const focusTower = focusId ? scene.towers.find((t) => t.id === focusId) ?? null : null;
     if (focusId !== st.lastFocus) {
+      const hadFocus = st.lastFocus !== null;
       st.lastFocus = focusId;
-      if (focusTower) {
-        const dest = new THREE.Vector3(focusTower.x, 0, focusTower.z);
+      if (focusTower || hadFocus) {
+        const dest = new THREE.Vector3(focusTower ? focusTower.x : 0, 0, focusTower ? focusTower.z : 0);
         if (st.reduced) {
           st.target.copy(dest);
           renderNow();
@@ -562,23 +587,40 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     st.tops = new Map();
     st.bases = new Map();
 
-    const cafes: TownCafe[] = scene.towers.map((t) => {
-      const count = towerVoxels(t, palette).count;
-      return {
+    const ringRadii = scene.rings.map((r) => r.radiusUnits);
+    const counts = scene.towers.map((t) => towerVoxels(t, palette).count);
+    if (st.proc) {
+      st.root.remove(st.proc);
+      st.proc.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.geometry.dispose();
+          (mesh.material as THREE.Material).dispose();
+        }
+      });
+      st.proc = null;
+    }
+    if (st.realTown) {
+      // Café towers stay the tallest nearby: neighbours are capped one voxel below the tower.
+      const spots: CafeSpot[] = scene.towers.map((t, i) => ({
         x: t.x,
         z: t.z,
-        clear: count <= 3 ? 7.5 : count <= 5 ? 6 : 4.5,
-        cap: Math.min(6, Math.max(2, count)),
-      };
-    });
-    const townPlan = planTown({
-      seed: seedFromString(scene.home.label),
-      half: 90,
-      cafes,
-      ringRadii: scene.rings.map((r) => r.radiusUnits),
-    });
-    st.streets = townPlan.streets;
-    content.add(buildTown(townPlan, townPalette(palette), cafes).group);
+        clear: counts[i] <= 3 ? 7.5 : counts[i] <= 5 ? 6 : 4.5,
+        cap: Math.max(0.8, counts[i] - 1),
+      }));
+      st.realTown.update(spots, ringRadii);
+    } else {
+      const cafes: TownCafe[] = scene.towers.map((t, i) => ({
+        x: t.x,
+        z: t.z,
+        clear: counts[i] <= 3 ? 7.5 : counts[i] <= 5 ? 6 : 4.5,
+        cap: Math.min(6, Math.max(2, counts[i])),
+      }));
+      const townPlan = planTown({ seed: seedFromString(scene.home.label), half: 90, cafes, ringRadii });
+      st.streets = townPlan.streets;
+      st.proc = buildTown(townPlan, townPalette(world), cafes).group;
+      st.root.add(st.proc);
+    }
 
     const targets = new Map<string, { count: number; colors: string[]; marker: boolean }>();
     for (const tower of scene.towers) targets.set(tower.id, towerVoxels(tower, palette));
@@ -739,6 +781,16 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       st.scanTimer = window.setInterval(drawScan, 140);
     }
 
+    if (st.realTown && scene.towers.length > 0) {
+      const lots = boxMesh(scene.towers.length + 1, world.sidewalk);
+      lots.userData.layer = "lots";
+      scene.towers.forEach((t, i) => place(lots, i, t.x, LOT_Y / 2, t.z, 3.4, LOT_Y, 3.4, world.sidewalk));
+      place(lots, scene.towers.length, scene.home.x, LOT_Y / 2, scene.home.z, 3.4, LOT_Y, 3.4, world.sidewalk);
+      lots.instanceMatrix.needsUpdate = true;
+      if (lots.instanceColor) lots.instanceColor.needsUpdate = true;
+      content.add(lots);
+    }
+
     const homeBase = LOT_Y;
     const homeMesh = boxMesh(5, palette.accent2);
     homeMesh.userData.layer = "home";
@@ -756,7 +808,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     renderNow();
     onReadyRef.current?.();
     ((st as unknown as { setupLife?: () => void }).setupLife ?? (() => {}))();
-  }, [scene, loading]);
+  }, [scene, loading, geo, focusId]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
@@ -775,7 +827,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         {homeLabel.docked ? scene.home.short : scene.home.label}
       </div>
       {labels.map((label) => {
-        const open = label.id === selectedId || label.id === hoverId || label.id === scene.focusId;
+        const open = label.id === selectedId || label.id === hoverId || label.id === focusId;
         if (!open) {
           return (
             <button

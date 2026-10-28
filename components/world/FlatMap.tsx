@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { compactLabel, fitScene } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
+import type { GeoSnapshot } from "../../lib/geomap";
+import { footprintPath } from "./realTown";
 
 export type FlatMapProps = {
   scene: Scene;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Real footprints, drawn as faint outlines under the plan. */
+  geo?: GeoSnapshot | null;
 };
 
 function roleFill(tower: Tower): string {
@@ -27,7 +31,8 @@ function roleFill(tower: Tower): string {
   }
 }
 
-export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
+export default function FlatMap({ scene, selectedId, onSelect, geo = null }: FlatMapProps) {
+  const outlines = useMemo(() => (geo ? footprintPath(geo) : ""), [geo]);
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -75,6 +80,7 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
         aria-label="Top-down plan of the taste neighbourhood"
       >
         <rect x={-H} y={-H} width={H * 2} height={H * 2} fill="var(--c-sunken)" />
+        {outlines && <path d={outlines} fill="none" stroke="var(--c-line)" strokeWidth={H / 400} />}
         {grid.map((g) => (
           <g key={g} stroke="var(--c-line)" strokeWidth={H / 160}>
             <line x1={g} y1={-H} x2={g} y2={H} />

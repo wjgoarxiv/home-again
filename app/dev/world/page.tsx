@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { notFound } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { notFound, useSearchParams } from "next/navigation";
 import { z } from "zod";
 import { AREAS } from "../../../lib/areas";
+import type { Area } from "../../../lib/schema";
 import { SavedCafeSchema, type Card, type JourneyState, type Verdict } from "../../../lib/schema";
 
 type SavedCafe = z.infer<typeof SavedCafeSchema>;
 import World from "../../../components/world/World";
 
-const AREA = AREAS[0];
+const AREA_KEYS: Record<string, Area> = { ev: AREAS[0], wb: AREAS[1], wv: AREAS[2] };
 
-const SAVED: SavedCafe[] = [
+const savedFor = (AREA: Area): SavedCafe[] => [
   {
     id: "ev-saved-01",
     name: "Saved Roasters",
@@ -31,7 +32,7 @@ const SAVED: SavedCafe[] = [
   },
 ];
 
-const CARDS: Card[] = [
+const cardsFor = (AREA: Area): Card[] => [
   {
     entityId: "ev-01",
     name: "Morning Plot",
@@ -71,7 +72,7 @@ const CARDS: Card[] = [
   },
 ];
 
-const BASE_STATE: JourneyState = {
+const stateFor = (AREA: Area): JourneyState => ({
   seed: { id: "seed-fritz", name: "Fritz Coffee Company Dohwa", city: "Seoul" },
   area: AREA,
   week: 2,
@@ -80,16 +81,38 @@ const BASE_STATE: JourneyState = {
   rejected: [],
   seen: ["ev-saved-02"],
   shown: ["ev-01", "ev-02", "ev-03"],
-  saved: SAVED,
+  saved: savedFor(AREA),
   loves: { "ev-03": 1, "ev-saved-01": 1 },
   regular: null,
   done: false,
-};
+});
 
 const CYCLE: (Verdict | null)[] = [null, "love", "crowded", "meh"];
 
 export default function DevWorldPage() {
   if (process.env.NODE_ENV === "production") notFound();
+  return (
+    <Suspense fallback={null}>
+      <DevWorld />
+    </Suspense>
+  );
+}
+
+type Stats = { draws: string; tris: string; fps: string };
+
+function DevWorld() {
+  const key = useSearchParams().get("area") ?? "ev";
+  const area = AREA_KEYS[key] ?? AREAS[0];
+  const state = useMemo(() => stateFor(area), [area]);
+  const cards = useMemo(() => cardsFor(area), [area]);
+  const [stats, setStats] = useState<Stats>({ draws: "-", tris: "-", fps: "-" });
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const el = document.querySelector<HTMLElement>("[data-draws]");
+      if (el) setStats({ draws: el.dataset.draws ?? "-", tris: el.dataset.tris ?? "-", fps: el.dataset.fps ?? "-" });
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, []);
   const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({ "ev-01": "love", "ev-02": "crowded" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [wide, setWide] = useState(false);
@@ -115,7 +138,7 @@ export default function DevWorldPage() {
         <h1 className="ui-h2">Voxel neighbourhood</h1>
       </header>
       <div className="ui-cluster">
-        {CARDS.map((card) => (
+        {cards.map((card) => (
           <button
             key={card.entityId}
             type="button"
@@ -135,8 +158,9 @@ export default function DevWorldPage() {
         style={{ height: "70vh", minHeight: 420, border: "3px solid var(--c-ink)" }}
       >
         <World
-          state={BASE_STATE}
-          cards={CARDS}
+          key={area.name}
+          state={state}
+          cards={cards}
           verdicts={verdicts}
           selectedId={selectedId}
           onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
@@ -152,7 +176,8 @@ export default function DevWorldPage() {
           padding: "8px 12px",
         }}
       >
-        SYNTHETIC DATA ONLY · NO NETWORK · SELECTED {selectedId ?? "NONE"}
+        SYNTHETIC DATA ONLY · NO NETWORK · {area.name.toUpperCase()} · SELECTED {selectedId ?? "NONE"} · DRAWS {stats.draws} ·
+        TRIANGLES {stats.tris} · FPS {stats.fps}
       </p>
     </main>
   );
