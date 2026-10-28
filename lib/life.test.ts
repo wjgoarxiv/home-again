@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { agentPosition, headingOf, planAgents, stepAgent, type Agent, type Spot, type Street } from "./life";
+import {
+  GAIT_AMP,
+  GAIT_STRIDE,
+  LANE_OFFSET,
+  MAX_BUSES,
+  agentPosition,
+  gaitSwing,
+  headingOf,
+  planAgents,
+  roadHalfWidth,
+  sidewalkOffset,
+  stepAgent,
+  type Agent,
+  type Spot,
+  type Street,
+} from "./life";
 
 const STREETS: Street[] = [
   { x: -10, z: 0, dir: "x", length: 20, lanes: 2 },
@@ -16,6 +31,7 @@ const SPOTS: Spot[] = [
 function kinds(agents: Agent[]) {
   return {
     cars: agents.filter((a) => a.kind === "car"),
+    buses: agents.filter((a) => a.kind === "bus"),
     peds: agents.filter((a) => a.kind === "ped"),
     steam: agents.filter((a) => a.kind === "steam"),
     birds: agents.filter((a) => a.kind === "bird"),
@@ -85,17 +101,114 @@ describe("planAgents counts", () => {
     expect(dirs.has(-1)).toBe(true);
   });
 
-  it("keeps speeds in range (cars 2-4, peds 0.3-0.6 units/sec)", () => {
+  it("keeps speeds in range (cars 0.8-1.4, buses 0.6-0.9, peds 0.12-0.2 units/sec)", () => {
     const agents = planAgents(STREETS, SPOTS, 7, 1);
     for (const a of agents) {
       if (a.kind === "car") {
-        expect(a.speed).toBeGreaterThanOrEqual(2);
-        expect(a.speed).toBeLessThanOrEqual(4);
+        expect(a.speed).toBeGreaterThanOrEqual(0.8);
+        expect(a.speed).toBeLessThanOrEqual(1.4);
+      }
+      if (a.kind === "bus") {
+        expect(a.speed).toBeGreaterThanOrEqual(0.6);
+        expect(a.speed).toBeLessThanOrEqual(0.9);
       }
       if (a.kind === "ped") {
-        expect(a.speed).toBeGreaterThanOrEqual(0.3);
-        expect(a.speed).toBeLessThanOrEqual(0.6);
+        expect(a.speed).toBeGreaterThanOrEqual(0.12);
+        expect(a.speed).toBeLessThanOrEqual(0.2);
       }
+    }
+  });
+
+  it("separates the two lanes by +/-0.12 and keeps one-lane traffic on the centreline", () => {
+    expect(LANE_OFFSET).toBe(0.12);
+    for (const a of planAgents(STREETS, SPOTS, 7, 1)) {
+      if (a.kind !== "car" && a.kind !== "bus") continue;
+      if (STREETS[a.street].lanes === 1) expect(a.off).toBe(0);
+      else expect(a.off).toBeCloseTo(a.dir === 1 ? LANE_OFFSET : -LANE_OFFSET, 9);
+    }
+  });
+});
+
+describe("planAgents buses", () => {
+  const LONG: Street[] = [
+    { x: -20, z: 0, dir: "x", length: 40, lanes: 2 },
+    { x: -15, z: 6, dir: "x", length: 30, lanes: 2 },
+    { x: 0, z: -20, dir: "z", length: 25, lanes: 2 },
+    { x: -9, z: -9, dir: "x", length: 50, lanes: 1 },
+    { x: 8, z: -12, dir: "z", length: 8, lanes: 2 },
+  ];
+
+  it("caps buses at 6 for density 1, scales with density, and none at density 0", () => {
+    expect(MAX_BUSES).toBe(6);
+    expect(kinds(planAgents(LONG, SPOTS, 7, 0)).buses).toHaveLength(0);
+    const half = kinds(planAgents(LONG, SPOTS, 7, 0.5)).buses.length;
+    const full = kinds(planAgents(LONG, SPOTS, 7, 1)).buses.length;
+    expect(full).toBeGreaterThan(0);
+    expect(full).toBeLessThanOrEqual(MAX_BUSES);
+    expect(half).toBeLessThanOrEqual(full);
+    expect(kinds(planAgents(Array.from({ length: 20 }, (_, i) => ({ x: -20, z: i * 3, dir: "x" as const, length: 40 + i, lanes: 2 as const })), SPOTS, 7, 1)).buses).toHaveLength(MAX_BUSES);
+  });
+
+  it("makes no buses without a two-lane street and never crowds one street with more than two", () => {
+    expect(kinds(planAgents([{ x: 0, z: 0, dir: "x", length: 30, lanes: 1 }], SPOTS, 7, 1)).buses).toHaveLength(0);
+    const one = kinds(planAgents([{ x: 0, z: 0, dir: "x", length: 30, lanes: 2 }], SPOTS, 7, 1)).buses;
+    expect(one).toHaveLength(2);
+    expect(new Set(one.map((b) => (b.kind === "bus" ? b.dir : 0)))).toEqual(new Set([1, -1]));
+  });
+
+  it("puts buses only on the longest two-lane streets", () => {
+    const buses = kinds(planAgents(LONG, SPOTS, 7, 1)).buses;
+    const twoLaneByLength = LONG.map((s, i) => ({ s, i })).filter(({ s }) => s.lanes === 2).sort((a, b) => b.s.length - a.s.length);
+    const allowed = new Set(twoLaneByLength.slice(0, MAX_BUSES).map(({ i }) => i));
+    for (const b of buses) {
+      if (b.kind !== "bus") continue;
+      expect(LONG[b.street].lanes).toBe(2);
+      expect(allowed.has(b.street)).toBe(true);
+    }
+    // the 8-unit stub is the shortest two-lane street: with six buses it is still eligible, but the 50-unit one-lane street never is
+    expect(buses.some((b) => b.kind === "bus" && b.street === 3)).toBe(false);
+  });
+
+  it("stays on its street segment and lane over many steps", () => {
+    let buses = kinds(planAgents(LONG, SPOTS, 7, 1)).buses as Extract<Agent, { kind: "bus" }>[];
+    expect(buses.length).toBeGreaterThan(0);
+    for (let i = 0; i < 400; i++) {
+      buses = buses.map((a) => stepAgent(a, 0.25) as Extract<Agent, { kind: "bus" }>);
+      for (const a of buses) {
+        expect(a.kind).toBe("bus");
+        const st = LONG[a.street];
+        const p = agentPosition(a);
+        if (st.dir === "x") {
+          expect(p.x).toBeGreaterThanOrEqual(st.x - 1e-9);
+          expect(p.x).toBeLessThanOrEqual(st.x + st.length + 1e-9);
+          expect(Math.abs(p.z - st.z)).toBeCloseTo(LANE_OFFSET, 9);
+        } else {
+          expect(p.z).toBeGreaterThanOrEqual(st.z - 1e-9);
+          expect(p.z).toBeLessThanOrEqual(st.z + st.length + 1e-9);
+          expect(Math.abs(p.x - st.x)).toBeCloseTo(LANE_OFFSET, 9);
+        }
+      }
+    }
+  });
+
+  it("is deterministic and has a heading along its street", () => {
+    expect(planAgents(LONG, SPOTS, 5, 1)).toEqual(planAgents(LONG, SPOTS, 5, 1));
+    for (const b of kinds(planAgents(LONG, SPOTS, 5, 1)).buses) {
+      if (b.kind !== "bus") continue;
+      expect(headingOf(b)).toEqual(b.axis === "x" ? { x: b.dir, z: 0 } : { x: 0, z: b.dir });
+    }
+  });
+});
+
+describe("road and sidewalk numbers", () => {
+  it("mirrors the real-town ribbons: road 0.55 + 0.2 per lane, 0.15 of sidewalk beyond each edge", () => {
+    expect(roadHalfWidth(1)).toBeCloseTo(0.375, 9);
+    expect(roadHalfWidth(2)).toBeCloseTo(0.475, 9);
+    expect(sidewalkOffset(1)).toBeCloseTo(0.45, 9);
+    expect(sidewalkOffset(2)).toBeCloseTo(0.55, 9);
+    for (const lanes of [1, 2] as const) {
+      expect(sidewalkOffset(lanes)).toBeGreaterThan(roadHalfWidth(lanes));
+      expect(sidewalkOffset(lanes)).toBeLessThan(roadHalfWidth(lanes) + 0.15);
     }
   });
 });
@@ -119,17 +232,17 @@ describe("stepAgent", () => {
         if (st.dir === "x") {
           expect(p.x).toBeGreaterThanOrEqual(st.x - 1e-9);
           expect(p.x).toBeLessThanOrEqual(st.x + st.length + 1e-9);
-          expect(Math.abs(p.z - st.z)).toBeLessThanOrEqual(1.0);
+          expect(Math.abs(p.z - st.z)).toBeLessThanOrEqual(LANE_OFFSET + 1e-9);
         } else {
           expect(p.z).toBeGreaterThanOrEqual(st.z - 1e-9);
           expect(p.z).toBeLessThanOrEqual(st.z + st.length + 1e-9);
-          expect(Math.abs(p.x - st.x)).toBeLessThanOrEqual(1.0);
+          expect(Math.abs(p.x - st.x)).toBeLessThanOrEqual(LANE_OFFSET + 1e-9);
         }
       }
     }
   });
 
-  it("keeps pedestrians on sidewalks (offset ~0.6 from street centre)", () => {
+  it("keeps pedestrians on the sidewalk strip beside the road edge", () => {
     let agents = planAgents(STREETS, SPOTS, 7, 1).filter((a) => a.kind === "ped");
     for (let i = 0; i < 200; i++) {
       agents = agents.map((a) => (stepAgent(a, 0.25) as Extract<Agent, { kind: "ped" }>)!);
@@ -139,11 +252,11 @@ describe("stepAgent", () => {
         if (st.dir === "x") {
           expect(p.x).toBeGreaterThanOrEqual(st.x - 1e-9);
           expect(p.x).toBeLessThanOrEqual(st.x + st.length + 1e-9);
-          expect(Math.abs(Math.abs(p.z - st.z) - 0.6)).toBeLessThan(0.05);
+          expect(Math.abs(Math.abs(p.z - st.z) - sidewalkOffset(st.lanes))).toBeLessThan(1e-9);
         } else {
           expect(p.z).toBeGreaterThanOrEqual(st.z - 1e-9);
           expect(p.z).toBeLessThanOrEqual(st.z + st.length + 1e-9);
-          expect(Math.abs(Math.abs(p.x - st.x) - 0.6)).toBeLessThan(0.05);
+          expect(Math.abs(Math.abs(p.x - st.x) - sidewalkOffset(st.lanes))).toBeLessThan(1e-9);
         }
       }
     }
@@ -172,7 +285,7 @@ describe("stepAgent", () => {
   it("advances steam/bird/light phases without leaving home", () => {
     const agents = planAgents(STREETS, SPOTS, 7, 1);
     for (const a of agents) {
-      if (a.kind === "car" || a.kind === "ped") continue;
+      if (a.kind === "car" || a.kind === "bus" || a.kind === "ped") continue;
       const before = agentPosition(a);
       const next = stepAgent(a, 1);
       expect(next).not.toEqual(a);
@@ -184,6 +297,37 @@ describe("stepAgent", () => {
         expect(after.z).toBeCloseTo(before.z, 9);
       }
     }
+  });
+});
+
+describe("pedestrian gait", () => {
+  type Ped = Extract<Agent, { kind: "ped" }>;
+  const peds = () => planAgents(STREETS, SPOTS, 7, 1).filter((a): a is Ped => a.kind === "ped");
+
+  it("counts the distance walked only while moving", () => {
+    const p = { ...peds()[0], pause: 0, nextPause: 100 };
+    const moved = stepAgent(p, 0.5) as Ped;
+    expect(moved.walked - p.walked).toBeCloseTo(p.speed * 0.5, 9);
+    const standing = stepAgent({ ...p, pause: 1 }, 0.5) as Ped;
+    expect(standing.walked).toBe(p.walked);
+  });
+
+  it("swings within the amplitude, repeats every stride and stands still during a pause", () => {
+    expect(GAIT_STRIDE).toBeGreaterThan(0);
+    for (const p of peds()) {
+      const moving = { ...p, pause: 0 };
+      expect(Math.abs(gaitSwing(moving))).toBeLessThanOrEqual(GAIT_AMP + 1e-9);
+      expect(gaitSwing({ ...moving, walked: moving.walked + GAIT_STRIDE })).toBeCloseTo(gaitSwing(moving), 9);
+      expect(gaitSwing({ ...moving, pause: 1 })).toBe(0);
+    }
+    const base = { ...peds()[0], pause: 0, walked: 0 };
+    expect(gaitSwing({ ...base, walked: GAIT_STRIDE / 4 })).toBeCloseTo(GAIT_AMP, 9);
+    expect(gaitSwing({ ...base, walked: (3 * GAIT_STRIDE) / 4 })).toBeCloseTo(-GAIT_AMP, 9);
+  });
+
+  it("starts pedestrians at different points of the stride", () => {
+    const phases = new Set(peds().map((p) => Math.round(((p.walked / GAIT_STRIDE) % 1) * 20)));
+    expect(phases.size).toBeGreaterThan(5);
   });
 });
 

@@ -23,6 +23,9 @@ export type CarAgent = {
   off: number;
 };
 
+/** A city bus: same street-bound motion as a car, only longer and slower. */
+export type BusAgent = Omit<CarAgent, "kind"> & { kind: "bus" };
+
 export type PedAgent = {
   kind: "ped";
   id: string;
@@ -38,6 +41,8 @@ export type PedAgent = {
   off: number;
   pause: number;
   nextPause: number;
+  /** Distance walked so far in scene units; drives the arm and leg swing, so a pause freezes it. */
+  walked: number;
 };
 
 export type SteamAgent = {
@@ -71,12 +76,29 @@ export type LightAgent = {
   period: number;
 };
 
-export type Agent = CarAgent | PedAgent | SteamAgent | BirdAgent | LightAgent;
+export type Agent = CarAgent | BusAgent | PedAgent | SteamAgent | BirdAgent | LightAgent;
 
 export const MAX_CARS = 40;
+export const MAX_BUSES = 6;
 export const MAX_PEDS = 60;
 export const MAX_BIRDS = 8;
 const MAX_LIGHTS = 12;
+
+/** Distance of each car or bus from the street centreline on a two-lane street (a car is 0.2 wide). */
+export const LANE_OFFSET = 0.12;
+
+// Road ribbon of components/world/realTown.ts: 0.55 + 0.2 per lane wide, with a 0.15 sidewalk strip beyond each edge.
+const ROAD_BASE_W = 0.55;
+const ROAD_LANE_W = 0.2;
+const SIDEWALK_STRIP = 0.15;
+export const roadHalfWidth = (lanes: 1 | 2): number => (ROAD_BASE_W + ROAD_LANE_W * lanes) / 2;
+/** Centre of the sidewalk strip beside a street's road edge: where pedestrians walk. */
+export const sidewalkOffset = (lanes: 1 | 2): number => roadHalfWidth(lanes) + SIDEWALK_STRIP / 2;
+
+/** Distance a pedestrian covers in one full arm-and-leg cycle (two steps), in scene units. */
+export const GAIT_STRIDE = 0.16;
+/** Peak swing of a pedestrian's leg, in radians; arms swing a little less. */
+export const GAIT_AMP = 0.6;
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -114,13 +136,38 @@ export function planAgents(streets: Street[], spots: Spot[], seed: number, densi
       street: si,
       s: rng() * st.length,
       dir,
-      speed: 2 + rng() * 2,
+      speed: 0.8 + rng() * 0.6,
       lane,
       len: st.length,
       ox: st.x,
       oz: st.z,
       axis: st.dir,
-      off: !twoLane ? 0 : dir === 1 ? 0.35 : -0.35,
+      off: !twoLane ? 0 : dir === 1 ? LANE_OFFSET : -LANE_OFFSET,
+    });
+  }
+
+  // Buses run on the longest two-lane streets, at most two to a street (one each way).
+  const busStreets = usable
+    .filter(({ s }) => s.lanes === 2)
+    .sort((a, b) => b.s.length - a.s.length || a.i - b.i)
+    .slice(0, MAX_BUSES);
+  const busTarget = Math.min(Math.round(d * MAX_BUSES), busStreets.length * 2);
+  for (let i = 0; i < busTarget; i++) {
+    const { s: st, i: si } = busStreets[i % busStreets.length];
+    const dir: 1 | -1 = Math.floor(i / busStreets.length) % 2 === 0 ? 1 : -1;
+    agents.push({
+      kind: "bus",
+      id: `bus-${i}`,
+      street: si,
+      s: rng() * st.length,
+      dir,
+      speed: 0.6 + rng() * 0.3,
+      lane: dir === 1 ? 0 : 1,
+      len: st.length,
+      ox: st.x,
+      oz: st.z,
+      axis: st.dir,
+      off: dir === 1 ? LANE_OFFSET : -LANE_OFFSET,
     });
   }
 
@@ -134,15 +181,16 @@ export function planAgents(streets: Street[], spots: Spot[], seed: number, densi
       street: si,
       s: rng() * st.length,
       dir: rng() < 0.5 ? 1 : -1,
-      speed: 0.3 + rng() * 0.3,
+      speed: 0.12 + rng() * 0.08,
       side,
       len: st.length,
       ox: st.x,
       oz: st.z,
       axis: st.dir,
-      off: side * 0.6,
+      off: side * sidewalkOffset(st.lanes),
       pause: 0,
       nextPause: 0,
+      walked: rng() * GAIT_STRIDE * 8,
     });
   }
 
@@ -197,7 +245,7 @@ export function planAgents(streets: Street[], spots: Spot[], seed: number, densi
   return agents;
 }
 
-function stepCar(a: CarAgent, dt: number): CarAgent {
+function stepCar<T extends CarAgent | BusAgent>(a: T, dt: number): T {
   let s = a.s + a.dir * a.speed * dt;
   let dir = a.dir;
   if (a.len <= 0) return { ...a, s: 0 };
@@ -235,8 +283,9 @@ function stepPed(a: PedAgent, dt: number): PedAgent {
     }
   }
   const nextPause = a.nextPause - dt;
-  if (nextPause <= 0) return { ...a, s, dir, pause: 1.5, nextPause: 6 };
-  return { ...a, s, dir, nextPause };
+  const walked = a.walked + a.speed * dt;
+  if (nextPause <= 0) return { ...a, s, dir, walked, pause: 1.5, nextPause: 6 };
+  return { ...a, s, dir, walked, nextPause };
 }
 
 export function stepAgent(agent: Agent, dtSec: number): Agent {
@@ -244,6 +293,7 @@ export function stepAgent(agent: Agent, dtSec: number): Agent {
   const dt = Math.min(dtSec, 5);
   switch (agent.kind) {
     case "car":
+    case "bus":
       return stepCar(agent, dt);
     case "ped":
       return stepPed(agent, dt);
@@ -259,6 +309,7 @@ export function stepAgent(agent: Agent, dtSec: number): Agent {
 export function writePosition(a: Agent, out: { x: number; y: number; z: number }): void {
   switch (a.kind) {
     case "car":
+    case "bus":
     case "ped":
       if (a.axis === "x") {
         out.x = a.ox + a.s;
@@ -294,7 +345,12 @@ export function agentPosition(a: Agent): { x: number; y: number; z: number } {
   return out;
 }
 
-/** Unit vector (x, z) a car or pedestrian is facing: along its street axis in the direction of travel. */
-export function headingOf(a: CarAgent | PedAgent): { x: number; z: number } {
+/** Leg swing in radians for a pedestrian (arms swing the other way): a sine of the distance walked, none during a pause. */
+export function gaitSwing(a: PedAgent): number {
+  return a.pause > 0 ? 0 : Math.sin((a.walked / GAIT_STRIDE) * Math.PI * 2) * GAIT_AMP;
+}
+
+/** Unit vector (x, z) a car, bus or pedestrian is facing: along its street axis in the direction of travel. */
+export function headingOf(a: CarAgent | BusAgent | PedAgent): { x: number; z: number } {
   return a.axis === "x" ? { x: a.dir, z: 0 } : { x: 0, z: a.dir };
 }
