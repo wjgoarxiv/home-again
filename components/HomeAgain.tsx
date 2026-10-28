@@ -64,9 +64,9 @@ function Glyph({ heights, accent }: { heights: number[]; accent?: boolean }) {
 }
 
 const EXPLAIN = [
-  { n: "01", title: "Your old café", text: "Name the café you used to call yours.", heights: [18] },
-  { n: "02", title: "Qloo taste signal", text: "Qloo ranks cafés near you by taste affinity with it.", heights: [10, 22, 15] },
-  { n: "03", title: "Your new regular", text: "Say how each went for three weeks. Love one twice and it is yours.", heights: [8, 12, 30], accent: true },
+  { n: "01", title: "Tell us your old café", short: "Your old café", text: "Name the café you used to call yours.", heights: [18] },
+  { n: "02", title: "Pick your new neighbourhood", short: "New area", text: "Choose East Village, Williamsburg or West Village.", heights: [10, 22, 15] },
+  { n: "03", title: "Rate visits for three weeks", short: "Rate your visits", text: "Love the same place twice and it becomes your new regular.", heights: [8, 12, 30], accent: true },
 ] as const;
 
 const NO_CARDS: Card[] = [];
@@ -410,20 +410,36 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                   </div>
                   <ol data-tour="intro" className="grid grid-cols-3 gap-2" aria-label="How it works">
                     {EXPLAIN.map((e) => (
-                      <li key={e.n} className="ui-callout" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
-                        <div className="flex flex-col items-start gap-2">
-                          <span className="max-sm:hidden">
+                      <li key={e.n} className="ui-callout min-w-0" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
+                        <div className="flex min-w-0 flex-col items-start gap-2">
+                          <span className="max-sm:hidden [@media(max-height:760px)]:hidden">
                             <Glyph heights={[...e.heights]} accent={"accent" in e} />
                           </span>
                           <div className="min-w-0">
                             <p className="ui-coord ui-num hidden sm:block">{e.n}</p>
-                            <h2 className="ui-h4">{e.title}</h2>
+                            <h2 className="ui-h4 min-w-0 break-words">
+                              <span className="sm:hidden">{e.short}</span>
+                              <span className="max-sm:hidden">{e.title}</span>
+                            </h2>
                             <p className="ui-small max-sm:hidden [@media(max-height:760px)]:hidden">{e.text}</p>
                           </div>
                         </div>
                       </li>
                     ))}
                   </ol>
+                  <div className="[@media(max-height:760px)]:hidden" aria-label="Example result">
+                    <div className="ui-callout" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
+                      <p className="ui-label">What you get, for example</p>
+                      <p className="ui-small">
+                        <b>Your old café in Seoul</b> → an East Village café that shares its taste tags on Qloo, like:
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {["espresso", "pastries", "quiet"].map((t) => (
+                          <span key={t} className="ui-tag ui-tag--accent">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
               {busy && !journey && (
