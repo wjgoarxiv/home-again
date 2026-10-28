@@ -10,6 +10,7 @@ import { QlooPanel, type Trace } from "./QlooPanel";
 import { RegularFound } from "./RegularFound";
 import { SeedForm } from "./SeedForm";
 import { WeekStepper } from "./WeekStepper";
+import World from "./world/World";
 
 const WEEK_RADII = [1000, 700, 500] as const;
 
@@ -165,10 +166,11 @@ export function HomeAgain() {
         <main className="grid w-full gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
           <section className="ui-stack" aria-label="Neighbourhood">
             <WeekStepper week={journey.week} wide={wide} />
-            <div data-stage className="ui-frame relative h-[55vh] min-h-[320px] lg:h-[calc(100dvh-12rem)]">
-              <p className="ui-coord">
-                {journey.area.name} · radius {radiusM} m · old regular {journey.seed.name}
-              </p>
+            <p className="ui-coord">
+              {journey.area.name} · radius {radiusM} m · tower height = Qloo affinity · old regular {journey.seed.name}
+            </p>
+            <div data-stage className="relative h-[55vh] min-h-[320px] border-2 border-line-strong lg:h-[calc(100dvh-14rem)]">
+              <World state={journey} cards={cards} verdicts={verdicts} selectedId={selectedId} onSelect={select} radiusM={radiusM} loading={busy} />
             </div>
           </section>
 
