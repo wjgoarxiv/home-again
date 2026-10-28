@@ -1,26 +1,72 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper: #fbfaf7;
+  --sand: #f3ece0;
+  --sand-strong: #e6d9c3;
+  --ink: #1d2523;
+  --muted: #5b6662;
+  --line: #e4ddd1;
+  --card: #ffffff;
+  --teal: #0f5c56;
+  --teal-soft: #dcefeb;
+  --coral: #e0674c;
+  --coral-soft: #fbe3dc;
+  --danger: #a33a24;
+  --shadow: 0 1px 2px rgb(29 37 35 / 0.06), 0 8px 24px rgb(29 37 35 / 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: #121715;
+    --sand: #1b221f;
+    --sand-strong: #2a332f;
+    --ink: #eef1ee;
+    --muted: #a3ada8;
+    --line: #2c3531;
+    --card: #19201d;
+    --teal: #6cc4b8;
+    --teal-soft: #173430;
+    --coral: #f08a72;
+    --coral-soft: #3a221c;
+    --danger: #f08a72;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.25);
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sand: var(--sand);
+  --color-sand-strong: var(--sand-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-card: var(--card);
+  --color-teal: var(--teal);
+  --color-teal-soft: var(--teal-soft);
+  --color-coral: var(--coral);
+  --color-coral-soft: var(--coral-soft);
+  --color-danger: var(--danger);
+  --shadow-soft: var(--shadow);
+  --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-fraunces);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background:
+    radial-gradient(60rem 30rem at 85% -10%, var(--teal-soft), transparent 70%),
+    radial-gradient(40rem 24rem at -10% 10%, var(--coral-soft), transparent 70%),
+    var(--paper);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
