@@ -30,7 +30,7 @@ Built for the Qloo Agentic Hackathon 2026.
 ## ☕ How it works
 
 1. Pick an old café from the gallery (Fritz Coffee Company Dohwa or Anthracite Yeonhui in Seoul, Blue Bottle Coffee in San Francisco), or type your own, and choose a New York neighbourhood.
-2. Your new neighbourhood appears as a 3D map of the real streets and buildings. Each café Qloo suggests stands as a tower: its height is the Qloo affinity with your old café, its top colour the kind of taste you share (drinks, ambience, decor, menu), and the dashed ring is this week's search radius.
+2. Your new neighbourhood appears as a 3D map of the real streets and buildings. Each café Qloo suggests stands as a tower: its height is the Qloo affinity with your old café, its top colour the kind of taste you share (drinks, ambience, decor, menu).
 3. Beside it, the Qloo panel shows the request that produced the towers: the location and radius, the taste signal (your old café plus every café you loved), what was excluded and why, and how many cafés came back.
 4. Each card adds Qloo's photo, today's opening hours, price level and a short description to the shared taste tags. Tell it how each one went:
 
