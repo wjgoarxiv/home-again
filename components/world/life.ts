@@ -1,12 +1,11 @@
 import * as THREE from "three";
-import { planAgents, stepAgent, writePosition, type Agent, type Spot, type Street } from "../../lib/life";
+import { headingOf, planAgents, stepAgent, writePosition, type Agent, type Spot, type Street } from "../../lib/life";
+import { FALLBACK_PALETTE, type WorldPalette } from "./palette";
 
-export type LifePalette = {
-  car: string[];
-  person: string[];
-  steam: string;
-  bird: string;
-};
+export type LifePalette = WorldPalette;
+
+/** The pre-round-5 input shape; still accepted so an unwired host keeps compiling (cars then use `car`). */
+export type LegacyLifePalette = { car: string[]; person: string[]; steam: string; bird: string };
 
 export type CreateLifeOptions = {
   scene: THREE.Scene;
@@ -14,7 +13,7 @@ export type CreateLifeOptions = {
   spots: Spot[];
   seed: number;
   density: number;
-  palette: LifePalette;
+  palette: LifePalette | LegacyLifePalette;
 };
 
 export type LifeHandle = {
@@ -25,14 +24,42 @@ export type LifeHandle = {
 
 const STEAM_PUFFS = 3;
 const STEAM_RISE = 2.2;
-const RED = "#c8370c";
-const GREEN = "#2e7d46";
+
+type Part = { ox: number; oy: number; oz: number; sx: number; sy: number; sz: number };
+const part = (ox: number, oy: number, oz: number, sx: number, sy: number, sz: number): Part => ({ ox, oy, oz, sx, sy, sz });
+
+// Car-local frame: +x is the direction of travel, +z the right-hand side, y up. Body is 2.0 x 0.6 x 0.95.
+const CAR_BODY = part(0, 0.48, 0, 2.0, 0.6, 0.95);
+const CAR_GLASS: Part[] = [
+  part(-0.1, 0.98, 0, 1.1, 0.4, 0.85), // cabin
+  part(0.47, 0.98, 0, 0.08, 0.3, 0.8), // windshield band
+  part(-0.67, 0.98, 0, 0.08, 0.3, 0.8), // rear-window band
+  part(1.02, 0.52, 0.3, 0.08, 0.16, 0.2), // headlights
+  part(1.02, 0.52, -0.3, 0.08, 0.16, 0.2),
+  part(-1.02, 0.52, 0.3, 0.08, 0.16, 0.2), // taillights
+  part(-1.02, 0.52, -0.3, 0.08, 0.16, 0.2),
+];
+const CAR_WHEELS: Part[] = [
+  part(0.62, 0.21, 0.5, 0.42, 0.42, 0.18),
+  part(0.62, 0.21, -0.5, 0.42, 0.42, 0.18),
+  part(-0.62, 0.21, 0.5, 0.42, 0.42, 0.18),
+  part(-0.62, 0.21, -0.5, 0.42, 0.42, 0.18),
+];
+// Pedestrian: torso 0.35 wide, head on top, about 1.1 tall in all.
+const PED_PARTS: Part[] = [part(0, 0.4, 0, 0.24, 0.8, 0.35), part(0, 0.95, 0, 0.28, 0.3, 0.28)];
+const SKIN_LIFT = [0, 0.25, 0.45];
+const WHITE = new THREE.Color(1, 1, 1);
+
+function resolvePalette(p: LifePalette | LegacyLifePalette): WorldPalette {
+  if ("cars" in p) return p;
+  return { ...FALLBACK_PALETTE, cars: p.car, people: p.person, steam: p.steam, bird: p.bird };
+}
 
 function pick(list: string[], i: number, fallback: string): string {
   return list.length > 0 ? (list[i % list.length] ?? fallback) : fallback;
 }
 
-function makeMesh(count: number, color: string, opts?: { transparent?: boolean; opacity?: number }): THREE.InstancedMesh {
+function makeMesh(name: string, count: number, color: string, opts?: { transparent?: boolean; opacity?: number }): THREE.InstancedMesh {
   const mesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshLambertMaterial({
@@ -42,6 +69,7 @@ function makeMesh(count: number, color: string, opts?: { transparent?: boolean; 
     }),
     Math.max(count, 1),
   );
+  mesh.name = name;
   mesh.count = count;
   mesh.frustumCulled = false;
   const m = new THREE.Matrix4();
@@ -55,7 +83,15 @@ function makeMesh(count: number, color: string, opts?: { transparent?: boolean; 
   return mesh;
 }
 
-export function createLife({ scene, streets, spots, seed, density, palette }: CreateLifeOptions): LifeHandle {
+function disposeMesh(mesh: THREE.InstancedMesh | null) {
+  if (!mesh) return;
+  mesh.removeFromParent();
+  mesh.geometry.dispose();
+  (mesh.material as THREE.Material).dispose();
+}
+
+export function createLife({ scene, streets, spots, seed, density, palette: given }: CreateLifeOptions): LifeHandle {
+  const palette = resolvePalette(given);
   let agents: Agent[] = planAgents(streets, spots, seed, density);
   let disposed = false;
 
@@ -66,6 +102,8 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
   const col = new THREE.Color();
   const out = { x: 0, y: 0, z: 0 };
 
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const yaw = new THREE.Quaternion();
   const setInstance = (
     mesh: THREE.InstancedMesh,
     i: number,
@@ -82,6 +120,14 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
     mesh.setMatrixAt(i, mat);
   };
 
+  // `yaw` must already hold the heading rotation: car-local +x maps to (hx, hz), local +z to (-hz, hx).
+  const placePart = (mesh: THREE.InstancedMesh, i: number, cx: number, cz: number, hx: number, hz: number, p: Part) => {
+    pos.set(cx + p.ox * hx - p.oz * hz, p.oy, cz + p.ox * hz + p.oz * hx);
+    scl.set(p.sx, p.sy, p.sz);
+    mat.compose(pos, yaw, scl);
+    mesh.setMatrixAt(i, mat);
+  };
+
   let cars: Extract<Agent, { kind: "car" }>[] = [];
   let peds: Extract<Agent, { kind: "ped" }>[] = [];
   let steams: Extract<Agent, { kind: "steam" }>[] = [];
@@ -89,7 +135,9 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
   let lights: Extract<Agent, { kind: "light" }>[] = [];
   let lightBucket: number[] = [];
 
-  let carMesh: THREE.InstancedMesh | null = null;
+  let carBody: THREE.InstancedMesh | null = null;
+  let carGlass: THREE.InstancedMesh | null = null;
+  let carWheels: THREE.InstancedMesh | null = null;
   let pedMesh: THREE.InstancedMesh | null = null;
   let steamMesh: THREE.InstancedMesh | null = null;
   let birdMesh: THREE.InstancedMesh | null = null;
@@ -111,21 +159,24 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
   };
 
   const paintStatic = () => {
-    if (carMesh) {
+    if (carBody && carGlass && carWheels) {
+      const glassLight = new THREE.Color(palette.glass).lerp(WHITE, 0.45);
+      const glassDark = new THREE.Color(palette.glass).multiplyScalar(0.45);
+      const glassColors = [glassLight, glassDark, glassDark];
       cars.forEach((_c, i) => {
-        const body = pick(palette.car, i, "#5a5e5a");
-        const roof = pick(palette.car, i + 1, "#2f322f");
-        col.set(body);
-        carMesh!.setColorAt(i * 2, col);
-        col.set(roof === body ? "#2f322f" : roof);
-        carMesh!.setColorAt(i * 2 + 1, col);
+        carBody!.setColorAt(i, col.set(pick(palette.cars, i, FALLBACK_PALETTE.cars[0])));
+        for (let k = 0; k < CAR_GLASS.length; k++) {
+          const c = k < 3 ? glassColors[k] : k < 5 ? col.set(palette.headlight) : col.set(palette.taillight);
+          carGlass!.setColorAt(i * CAR_GLASS.length + k, c);
+        }
+        for (let k = 0; k < CAR_WHEELS.length; k++) carWheels!.setColorAt(i * CAR_WHEELS.length + k, col.set(palette.wheel));
       });
-      if (carMesh.instanceColor) carMesh.instanceColor.needsUpdate = true;
+      for (const m of [carBody, carGlass, carWheels]) if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
     if (pedMesh) {
-      peds.forEach((p, i) => {
-        col.set(pick(palette.person, i, "#6b6e6a"));
-        pedMesh!.setColorAt(i, col);
+      peds.forEach((_p, i) => {
+        pedMesh!.setColorAt(i * 2, col.set(pick(palette.people, i, FALLBACK_PALETTE.people[0])));
+        pedMesh!.setColorAt(i * 2 + 1, col.set(palette.trunk).lerp(WHITE, SKIN_LIFT[i % SKIN_LIFT.length]));
       });
       if (pedMesh.instanceColor) pedMesh.instanceColor.needsUpdate = true;
     }
@@ -147,24 +198,16 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
 
   const buildKindMeshes = () => {
     split();
-    if (carMesh) {
-      scene.remove(carMesh);
-      carMesh.geometry.dispose();
-      (carMesh.material as THREE.Material).dispose();
-      carMesh = null;
-    }
-    if (pedMesh) {
-      scene.remove(pedMesh);
-      pedMesh.geometry.dispose();
-      (pedMesh.material as THREE.Material).dispose();
-      pedMesh = null;
-    }
+    for (const m of [carBody, carGlass, carWheels, pedMesh]) disposeMesh(m);
+    carBody = carGlass = carWheels = pedMesh = null;
     if (cars.length > 0) {
-      carMesh = makeMesh(cars.length * 2, "#ffffff");
-      scene.add(carMesh);
+      carBody = makeMesh("cars:body", cars.length, "#ffffff");
+      carGlass = makeMesh("cars:glass", cars.length * CAR_GLASS.length, "#ffffff");
+      carWheels = makeMesh("cars:wheels", cars.length * CAR_WHEELS.length, "#ffffff");
+      scene.add(carBody, carGlass, carWheels);
     }
     if (peds.length > 0) {
-      pedMesh = makeMesh(peds.length, "#ffffff");
+      pedMesh = makeMesh("people:figure", peds.length * PED_PARTS.length, "#ffffff");
       scene.add(pedMesh);
     }
   };
@@ -183,11 +226,11 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
       birdMesh = null;
     }
     if (steams.length > 0) {
-      steamMesh = makeMesh(steams.length * STEAM_PUFFS, palette.steam, { transparent: true, opacity: 0.55 });
+      steamMesh = makeMesh("steam", steams.length * STEAM_PUFFS, palette.steam, { transparent: true, opacity: 0.55 });
       scene.add(steamMesh);
     }
     if (birds.length > 0) {
-      birdMesh = makeMesh(birds.length, palette.bird);
+      birdMesh = makeMesh("birds", birds.length, palette.bird);
       scene.add(birdMesh);
     }
   };
@@ -201,27 +244,29 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
     }
     lightBucket = lights.map(() => -1);
     if (lights.length > 0) {
-      lightMesh = makeMesh(lights.length, RED);
+      lightMesh = makeMesh("signals", lights.length, palette.signalRed);
       scene.add(lightMesh);
     }
   };
 
   const layout = () => {
-    if (carMesh) {
+    if (carBody && carGlass && carWheels) {
       cars.forEach((c, i) => {
         writePosition(c, out);
-        const alongX = c.axis === "x";
-        const bl = 1.7;
-        const bw = 0.8;
-        setInstance(carMesh!, i * 2, out.x, 0.45, out.z, alongX ? bl : bw, 0.5, alongX ? bw : bl);
-        setInstance(carMesh!, i * 2 + 1, out.x, 0.87, out.z, alongX ? 0.8 : 0.7, 0.35, alongX ? 0.7 : 0.8);
+        const h = headingOf(c);
+        yaw.setFromAxisAngle(yAxis, Math.atan2(-h.z, h.x));
+        placePart(carBody!, i, out.x, out.z, h.x, h.z, CAR_BODY);
+        for (let k = 0; k < CAR_GLASS.length; k++) placePart(carGlass!, i * CAR_GLASS.length + k, out.x, out.z, h.x, h.z, CAR_GLASS[k]);
+        for (let k = 0; k < CAR_WHEELS.length; k++) placePart(carWheels!, i * CAR_WHEELS.length + k, out.x, out.z, h.x, h.z, CAR_WHEELS[k]);
       });
-      carMesh.instanceMatrix.needsUpdate = true;
+      for (const m of [carBody, carGlass, carWheels]) m.instanceMatrix.needsUpdate = true;
     }
     if (pedMesh) {
       peds.forEach((p, i) => {
         writePosition(p, out);
-        setInstance(pedMesh!, i, out.x, 0.5, out.z, 0.35, 1.0, 0.35);
+        const h = headingOf(p);
+        yaw.setFromAxisAngle(yAxis, Math.atan2(-h.z, h.x));
+        for (let k = 0; k < PED_PARTS.length; k++) placePart(pedMesh!, i * PED_PARTS.length + k, out.x, out.z, h.x, h.z, PED_PARTS[k]);
       });
       pedMesh.instanceMatrix.needsUpdate = true;
     }
@@ -261,7 +306,7 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
         const bucket = l.phase < l.period / 2 ? 0 : 1;
         if (lightBucket[i] !== bucket) {
           lightBucket[i] = bucket;
-          col.set(bucket === 0 ? RED : GREEN);
+          col.set(bucket === 0 ? palette.signalRed : palette.signalGreen);
           lightMesh!.setColorAt(i, col);
           colorsDirty = true;
         }
@@ -299,13 +344,8 @@ export function createLife({ scene, streets, spots, seed, density, palette }: Cr
     dispose() {
       if (disposed) return;
       disposed = true;
-      for (const mesh of [carMesh, pedMesh, steamMesh, birdMesh, lightMesh]) {
-        if (!mesh) continue;
-        scene.remove(mesh);
-        mesh.geometry.dispose();
-        (mesh.material as THREE.Material).dispose();
-      }
-      carMesh = pedMesh = steamMesh = birdMesh = lightMesh = null;
+      for (const mesh of [carBody, carGlass, carWheels, pedMesh, steamMesh, birdMesh, lightMesh]) disposeMesh(mesh);
+      carBody = carGlass = carWheels = pedMesh = steamMesh = birdMesh = lightMesh = null;
       agents = [];
     },
   };

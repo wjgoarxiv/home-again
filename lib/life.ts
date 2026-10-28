@@ -293,3 +293,8 @@ export function agentPosition(a: Agent): { x: number; y: number; z: number } {
   writePosition(a, out);
   return out;
 }
+
+/** Unit vector (x, z) a car or pedestrian is facing: along its street axis in the direction of travel. */
+export function headingOf(a: CarAgent | PedAgent): { x: number; z: number } {
+  return a.axis === "x" ? { x: a.dir, z: 0 } : { x: 0, z: a.dir };
+}

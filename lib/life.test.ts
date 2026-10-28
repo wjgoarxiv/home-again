@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentPosition, planAgents, stepAgent, type Agent, type Spot, type Street } from "./life";
+import { agentPosition, headingOf, planAgents, stepAgent, type Agent, type Spot, type Street } from "./life";
 
 const STREETS: Street[] = [
   { x: -10, z: 0, dir: "x", length: 20, lanes: 2 },
@@ -184,5 +184,54 @@ describe("stepAgent", () => {
         expect(after.z).toBeCloseTo(before.z, 9);
       }
     }
+  });
+});
+
+describe("headingOf", () => {
+  type Car = Extract<Agent, { kind: "car" }>;
+  const cars = () => planAgents(STREETS, SPOTS, 7, 1).filter((a): a is Car => a.kind === "car");
+
+  it("is a unit vector along the street axis in the direction of travel", () => {
+    for (const a of cars()) {
+      const h = headingOf(a);
+      expect(Math.hypot(h.x, h.z)).toBeCloseTo(1, 9);
+      if (a.axis === "x") expect(h).toEqual({ x: a.dir, z: 0 });
+      else expect(h).toEqual({ x: 0, z: a.dir });
+    }
+  });
+
+  it("matches the actual displacement over a small step, on both axes and both directions", () => {
+    const seen = new Set<string>();
+    for (const a of cars()) {
+      const moved = stepAgent({ ...a, s: a.len / 2 }, 0.05) as Car;
+      const mid = agentPosition({ ...a, s: a.len / 2 });
+      const after = agentPosition(moved);
+      const dx = after.x - mid.x;
+      const dz = after.z - mid.z;
+      const h = headingOf(moved);
+      expect(h.x * dx + h.z * dz).toBeGreaterThan(0);
+      expect(Math.hypot(dx, dz)).toBeGreaterThan(0);
+      seen.add(`${a.axis}${a.dir}`);
+    }
+    expect(seen).toEqual(new Set(["x1", "x-1", "z1"]));
+  });
+
+  it("flips on a U-turn at the end of a two-lane street and stays put when a one-lane street wraps", () => {
+    const two = cars().find((a) => a.lane === 1)!;
+    const nearEnd: Car = { ...two, s: two.len - 0.01, dir: 1 };
+    const before = headingOf(nearEnd);
+    const after = headingOf(stepAgent(nearEnd, 0.5) as Car);
+    expect(after.x).toBeCloseTo(-before.x, 9);
+    expect(after.z).toBeCloseTo(-before.z, 9);
+
+    const one = cars().find((a) => a.lane === 0 && STREETS[a.street].lanes === 1)!;
+    const wrapping: Car = { ...one, s: one.len - 0.01 };
+    expect(headingOf(stepAgent(wrapping, 0.5) as Car)).toEqual(headingOf(wrapping));
+  });
+
+  it("gives pedestrians a heading too", () => {
+    const ped = planAgents(STREETS, SPOTS, 7, 1).find((a) => a.kind === "ped")!;
+    if (ped.kind !== "ped") throw new Error("expected a pedestrian");
+    expect(Math.abs(headingOf(ped).x) + Math.abs(headingOf(ped).z)).toBe(1);
   });
 });
