@@ -68,6 +68,11 @@ describe("sceneBuildings", () => {
     expect(b.h).toBeCloseTo(heightUnits(170), 6);
     expect(b.cx).toBeCloseTo(0, 6);
   });
+  it("caps ordinary buildings at the skyline so only cafe towers rise above", () => {
+    const s = snap([{ h: 1500, rings: [box(0, 0, 4)] }]);
+    expect(sceneBuildings(s, { setback: 0 })[0].h).toBeCloseTo(2.4, 6);
+    expect(sceneBuildings(s, { setback: 0, skylineCap: Infinity })[0].h).toBeCloseTo(heightUnits(1500), 6);
+  });
   it("pulls footprints in from the street by the setback without inverting them", () => {
     const s = snap([{ h: 170, rings: [box(10, 10, 2)] }]);
     const [b] = sceneBuildings(s, { setback: 0.2 });
@@ -83,7 +88,7 @@ describe("buildingsForScene", () => {
     { h: 400, rings: [box(6, 0, 2)] },
     { h: 400, rings: [box(40, 0, 2)] },
   ]);
-  const opts = { setback: 0 };
+  const opts = { setback: 0, skylineCap: Infinity };
 
   it("removes buildings whose footprint is inside a cafe's clear radius", () => {
     const kept = buildingsForScene(s, [{ x: 0, z: 0, clear: 4.5, cap: 2 }], opts);
@@ -211,7 +216,7 @@ describe("buildRealTown", () => {
   });
 
   it("extrudes upwards: footprints stay in x/z and roofs sit at the building height", () => {
-    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0 });
+    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0, skylineCap: Infinity });
     const pos = t.buildingMesh.geometry.getAttribute("position");
     const idx = t.buildingMesh.geometry.getIndex()!;
     let maxY = -1;
@@ -227,7 +232,7 @@ describe("buildRealTown", () => {
   });
 
   it("faces every triangle outwards or up (no inverted normals)", () => {
-    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0 });
+    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0, skylineCap: Infinity });
     const g = t.buildingMesh.geometry;
     const pos = g.getAttribute("position");
     const nor = g.getAttribute("normal");
@@ -243,7 +248,7 @@ describe("buildRealTown", () => {
   });
 
   it("update() hides buildings near a cafe and caps their neighbours without rebuilding", () => {
-    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0 });
+    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0, skylineCap: Infinity });
     const geometry = t.buildingMesh.geometry;
     const full = geometry.drawRange.count;
     t.update([{ x: 0, z: 0, clear: 4.5, cap: 1 }]);
@@ -254,7 +259,7 @@ describe("buildRealTown", () => {
   });
 
   it("update() lowers heights near a cafe and restores them afterwards", () => {
-    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0 });
+    const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0, skylineCap: Infinity });
     const g = t.buildingMesh.geometry;
     const top = () => {
       const pos = g.getAttribute("position");

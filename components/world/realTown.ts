@@ -16,6 +16,8 @@ const MIN_HEIGHT = 0.5;
 const SOFT_HEIGHT = 4;
 const MAX_HEIGHT = 7;
 const CAP_RADIUS = 11;
+/** Quiet city: every ordinary building stops here, so only the cafe towers (2-12 units) rise above the skyline. */
+const SKYLINE_CAP = 2.4;
 
 export const slugOf = (areaName: string): string =>
   areaName.split(",")[0].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -74,6 +76,8 @@ export type SceneOpts = {
   /** Footprint pull-back from the street, units (default 0.15). */
   setback?: number;
   capRadius?: number;
+  /** Tallest an ordinary building may be, units (default SKYLINE_CAP). */
+  skylineCap?: number;
 };
 
 function distToRing(px: number, pz: number, ring: number[]): number {
@@ -129,7 +133,7 @@ export function sceneBuildings(snapshot: GeoSnapshot, opts: SceneOpts = {}): Sce
     }
     out.push({
       id,
-      h: heightUnits(src.h),
+      h: Math.min(heightUnits(src.h), opts.skylineCap ?? SKYLINE_CAP),
       rings,
       cx: (minX + maxX) / 2,
       cz: (minZ + maxZ) / 2,
