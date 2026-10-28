@@ -1,0 +1,205 @@
+{
+  "schema_id": "litfamily.frontend-style/v1",
+  "id": "home-again-friendly",
+  "name": "Home, again friendly pastel",
+  "summary": "A friendly, readable pastel register for Home, again: cream canvas, warm white surfaces, mint/peach/lavender/sky/butter tints, a coral signal and a plotter-blue second accent, softly rounded 8 to 12 px corners with one flat 1 px lip of elevation, Pretendard sans for body, headings and buttons at 16 px on a 1.5 line, near-black ink and clearly darker borders. Dark mode keeps a deep plum-navy with the same pastel signals but is not used this round.",
+  "use_when": [
+    "Home, again: a friendly pastel interface floating over a full-screen voxel neighbourhood"
+  ],
+  "avoid_when": [
+    "monospaced instrument or terminal looks",
+    "dense all-day tables where a calmer graphite register fits better"
+  ],
+  "keywords": [
+    "home again friendly",
+    "home-again-friendly",
+    "friendly pastel"
+  ],
+  "signature": [
+    "Pretendard everywhere: body, headings, buttons and labels at a 16 px base on a 1.5 line; JetBrains Mono only for small numbers and metrics",
+    "bold sentence-case headings: no forced uppercase on headings, labels, table heads or nav groups",
+    "soft pastel structure: 8 to 12 px corners, panels with a clear 1 px dark border and one flat 1 px lip (no blur, no glow), mint/peach/lavender/sky tints for featured blocks",
+    "high contrast on cream: near-black ink (16:1), secondary text at 7:1 or more, component edges at 3:1 or more, a deep-blue focus ring",
+    "plain panel heads: a title and a status on the panel surface, no inverse bars",
+    "a coral signal on the primary action and the figure that matters, plotter blue on the second series and the user's home; calm short motion with a gentle press"
+  ],
+  "forbid": [
+    "square instrument costume: inverse panel bars, 3 px rules, bracketed coordinates, terminal prompts, scanlines",
+    "uppercase headings, uppercase labels or wide letter-spacing on running text",
+    "blurred or soft drop shadows, glow, glassmorphism and gradients (DS-007 reports shadows off the flat lock)",
+    "rainbow charts, more than four accent hue families in one view, or decorative emoji",
+    "text below 13 px or below 4.5:1 contrast, and touch targets below 44 px"
+  ],
+  "fonts": {
+    "text": "Pretendard",
+    "display": "Pretendard",
+    "mono": "JetBrains Mono"
+  },
+  "type": {
+    "scale_px": {
+      "xs": 13,
+      "sm": 14,
+      "md": 15,
+      "base": 16,
+      "lg": 18,
+      "xl": 20,
+      "2xl": 24,
+      "3xl": 30,
+      "4xl": 38,
+      "5xl": 48
+    },
+    "display_px": {
+      "min": 36,
+      "max": 64
+    },
+    "moment_px": {
+      "max": 96
+    },
+    "weights": {
+      "text": 400,
+      "medium": 500,
+      "strong": 700,
+      "display": 760
+    },
+    "tracking_em": {
+      "display": -0.02,
+      "label": 0
+    },
+    "leading": {
+      "body": 1.5,
+      "tight": 1.3,
+      "display_latin": 1.15,
+      "display_korean": 1.25
+    }
+  },
+  "space_px": [
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    80,
+    96,
+    128
+  ],
+  "radius_px": {
+    "xs": 6,
+    "sm": 8,
+    "md": 12,
+    "lg": 12,
+    "pill": 999
+  },
+  "shadow": {
+    "raised": "0 1px 0 0 var(--c-line-strong)",
+    "overlay": "0 0 0 1px var(--c-ink)"
+  },
+  "motion": {
+    "fast_ms": 100,
+    "ui_ms": 160,
+    "enter_ms": 280,
+    "exit_ms": 120,
+    "ease": "cubic-bezier(0.22, 0.8, 0.24, 1)"
+  },
+  "shape": {
+    "border_px": {
+      "rule": 2,
+      "surface": 1,
+      "control": 2
+    },
+    "surface_line": "line-strong",
+    "control_edge": "control",
+    "elevation": "flat",
+    "offset_px": {
+      "surface": 0,
+      "control": 0
+    },
+    "press": "scale",
+    "meta_font": "text",
+    "meta_case": "none",
+    "display_case": "none",
+    "canvas_pattern": "none",
+    "heading_font": "display",
+    "panel_head": "plain",
+    "section_marks": "none"
+  },
+  "color": {
+    "light": {
+      "canvas": "#fbf7ef",
+      "surface": "#fffdf8",
+      "sunken": "#f2ebdc",
+      "ink": "#161826",
+      "ink-2": "#2f3550",
+      "ink-3": "#454b66",
+      "line": "#c4b696",
+      "line-strong": "#40455f",
+      "control": "#565c78",
+      "accent": "#ff7a59",
+      "accent-hover": "#ff8a6c",
+      "on-accent": "#0f111c",
+      "accent-wash": "#ffe4da",
+      "accent-ink": "#9a2c12",
+      "accent-2": "#3b69d4",
+      "accent-2-ink": "#244596",
+      "accent-2-wash": "#dfe9ff",
+      "on-accent-2": "#ffffff",
+      "support": "#cdeedb",
+      "support-ink": "#134a30",
+      "focus": "#1d4aa8",
+      "positive": "#14633a",
+      "positive-wash": "#d6f3e2",
+      "warning": "#6b4600",
+      "warning-wash": "#fff0bf",
+      "negative": "#9c1f19",
+      "negative-wash": "#ffdcd7",
+      "info": "#23508f",
+      "info-wash": "#dcebfd",
+      "chart-1": "#161826",
+      "chart-2": "#ff7a59",
+      "chart-3": "#565c78",
+      "chart-4": "#d7ceb8",
+      "chart-5": "#3fae7a"
+    },
+    "dark": {
+      "canvas": "#1c1b2b",
+      "surface": "#26253a",
+      "sunken": "#15141f",
+      "ink": "#f6f1ff",
+      "ink-2": "#d9d3ee",
+      "ink-3": "#b3acd0",
+      "line": "#35334d",
+      "line-strong": "#8e89b8",
+      "control": "#8a85b0",
+      "accent": "#ff9a7a",
+      "accent-hover": "#ffae92",
+      "on-accent": "#1c1b2b",
+      "accent-wash": "#3d2a32",
+      "accent-ink": "#ffab90",
+      "accent-2": "#8fb0ff",
+      "accent-2-ink": "#a9c2ff",
+      "accent-2-wash": "#262f52",
+      "on-accent-2": "#14172b",
+      "support": "#23403a",
+      "support-ink": "#b9f0d3",
+      "focus": "#ff9a7a",
+      "positive": "#7fe0a8",
+      "positive-wash": "#1f3a2e",
+      "warning": "#ffd778",
+      "warning-wash": "#3b3220",
+      "negative": "#ff8d85",
+      "negative-wash": "#46252a",
+      "info": "#8cc4ff",
+      "info-wash": "#1f3047",
+      "chart-1": "#f6f1ff",
+      "chart-2": "#ff9a7a",
+      "chart-3": "#8a85b0",
+      "chart-4": "#46446a",
+      "chart-5": "#7fe0a8"
+    }
+  },
+  "accent_art": "none"
+}

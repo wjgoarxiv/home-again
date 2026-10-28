@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Colours, type, spacing and corners come from the locked computational-brutalism kit (ui/tokens.css).
+/* Colours, type, spacing and corners come from the locked friendly-pastel kit (ui/tokens.css, source design/friendly.json).
    Tailwind is kept for layout utilities only; these aliases let utility classes reach the kit colours. */
 @theme inline {
   --color-canvas: var(--c-canvas);
@@ -16,6 +16,14 @@
   --color-support: var(--c-support);
   --color-negative: var(--c-negative);
 }
+
+/* The kit hard-codes a few parts to its instrument look (mono labels, bracketed coordinates, a terminal
+   prompt, a tight h1). They are softened here with tokens only, so the friendly theme holds whichever
+   classes a screen uses. */
+.ui-h1 { line-height: 1.2; }
+.ui-label { font-family: var(--font-meta); font-weight: var(--fw-medium); color: var(--on-head, var(--c-ink-3)); }
+.ui-coord { font-family: var(--font-meta); font-size: var(--fs-sm); letter-spacing: 0; text-transform: none; }
+.ui-coord::before, .ui-coord::after, .ui-prompt::before, .ui-prompt--cursor::after { content: none; }
 
 /* World palette (read by components/world/palette.ts; keep FALLBACK_PALETTE there in sync).
    Bright pastel, never flipped for dark mode so the map stays light. Cars avoid the café colours
