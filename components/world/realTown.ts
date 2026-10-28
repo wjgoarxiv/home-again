@@ -286,17 +286,44 @@ const CORNER_W = 0.07;
 const KERB_W = 0.07;
 /** Wall base colour factor: a soft ground-contact shade so tall blocks stand on the street instead of floating. */
 const BASE_SHADE = 0.88;
+/** Ink LOD (static, by size): edges shorter than this get no rim, shorter than CORNER_MIN_LEN or on buildings under CORNER_MIN_H no vertical strip. */
+const RIM_MIN_LEN = 0.3;
+const CORNER_MIN_LEN = 0.5;
+const CORNER_MIN_H = 1;
+/** The camera always looks from +x,+z, so a wall whose outward normal has nx + nz at or below this is never seen and needs no ink. */
+const FACING_MIN = 0.1;
+
+/** Ink width multiplier for a camera zoom: lines grow in world units as you zoom out and shrink as you zoom in, so they stay a similar pixel width. */
+export const inkScale = (zoom: number): number => Math.min(1.6, Math.max(0.3, Math.pow(Math.max(zoom, 0.01), -0.75)));
+
+/** Ink vertices carry their full-width offset in `aInk`; the shader moves them by (scale - 1) of it, so scale 1 is the geometry as built. */
+function patchInk(material: THREE.MeshLambertMaterial, uniform: { value: number }): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uInk = uniform;
+    shader.vertexShader = `attribute vec3 aInk;\nuniform float uInk;\n${shader.vertexShader}`.replace(
+      "#include <begin_vertex>",
+      "#include <begin_vertex>\n  transformed += aInk * (uInk - 1.0);",
+    );
+  };
+}
 
 class Mesh {
   pos: number[] = [];
   nor: number[] = [];
   col: number[] = [];
   idx: number[] = [];
+  ink: number[] = [];
   vert(x: number, y: number, z: number, nx: number, ny: number, nz: number, c: THREE.Color): number {
     this.pos.push(x, y, z);
     this.nor.push(nx, ny, nz);
     this.col.push(c.r, c.g, c.b);
+    this.ink.push(0, 0, 0);
     return this.pos.length / 3 - 1;
+  }
+  /** Mark a vertex as an ink edge that follows the zoom-aware width: its full offset from the line it hangs off. */
+  off(v: number, ox: number, oz: number): void {
+    this.ink[v * 3] = ox;
+    this.ink[v * 3 + 2] = oz;
   }
   /** Triangle wound so its geometric normal agrees with (nx, ny, nz). */
   tri(a: number, b: number, c: number, nx: number, ny: number, nz: number): void {
@@ -316,12 +343,13 @@ class Mesh {
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute("normal", new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute("aInk", new THREE.Float32BufferAttribute(this.ink, 3));
     g.setIndex(new THREE.Uint32BufferAttribute(this.idx, 1));
     return g;
   }
 }
 
-function flatQuad(m: Mesh, x1: number, z1: number, x2: number, z2: number, width: number, ext: number, y: number, c: THREE.Color) {
+function flatQuad(m: Mesh, x1: number, z1: number, x2: number, z2: number, width: number, ext: number, y: number, c: THREE.Color, inkW = 0) {
   const dx = x2 - x1, dz = z2 - z1;
   const len = Math.hypot(dx, dz);
   if (len === 0) return;
@@ -333,6 +361,12 @@ function flatQuad(m: Mesh, x1: number, z1: number, x2: number, z2: number, width
   const v2 = m.vert(bx - px, y, bz - pz, 0, 1, 0, c);
   const v3 = m.vert(ax - px, y, az - pz, 0, 1, 0, c);
   m.quad(v0, v1, v2, v3, 0, 1, 0);
+  if (inkW > 0) {
+    m.off(v0, -uz * inkW, ux * inkW);
+    m.off(v1, -uz * inkW, ux * inkW);
+    m.off(v2, uz * inkW, -ux * inkW);
+    m.off(v3, uz * inkW, -ux * inkW);
+  }
 }
 
 /** Ground slab, sidewalks, road ribbons and centre dashes as ONE vertex-coloured mesh (stacked a hair apart). */
@@ -366,7 +400,7 @@ function buildFlat(snapshot: GeoSnapshot, p: WorldPalette): THREE.BufferGeometry
         const x2 = s.p[i] / DM_PER_UNIT, z2 = s.p[i + 1] / DM_PER_UNIT;
         if (!inside(x1, z1) || !inside(x2, z2)) continue;
         if (pass === "side") flatQuad(m, x1, z1, x2, z2, w + SIDEWALK_EXTRA, (w + SIDEWALK_EXTRA) / 2, Y_SIDEWALK, side);
-        else if (pass === "kerb") flatQuad(m, x1, z1, x2, z2, w + KERB_W * 2, w / 2 + KERB_W, Y_KERB, kerb);
+        else if (pass === "kerb") flatQuad(m, x1, z1, x2, z2, w + KERB_W * 2, w / 2 + KERB_W, Y_KERB, kerb, KERB_W);
         else if (pass === "road") flatQuad(m, x1, z1, x2, z2, w, w / 2, Y_ROAD, road);
         else if (s.l >= 2) {
           const deg = (Math.atan2(Math.abs(z2 - z1), Math.abs(x2 - x1)) * 180) / Math.PI;
@@ -435,18 +469,28 @@ function addBuilding(m: Mesh, b: SceneBuilding, p: WorldPalette): Span {
       const a = m.vert(x1, 0, z1, nx, 0, nz, wallFoot), c = m.vert(x2, 0, z2, nx, 0, nz, wallFoot);
       const d = m.vert(x2, top, z2, nx, 0, nz, wallCol), e = m.vert(x1, top, z1, nx, 0, nz, wallCol);
       m.quad(a, c, d, e, nx, 0, nz);
-      // Ink: a vertical strip on the wall's start corner and a rim along the roof edge, both pulled in from the wall's ends.
+      // Ink LOD: a vertical strip on the wall's start corner only where it can be seen (wall faces the camera, tall enough, long enough),
+      // and a roof rim along every edge long enough to read; both pulled in from the wall's ends. Offsets feed the zoom-aware width.
       const ux = dx / len, uz = dz / len;
-      const cw = Math.min(CORNER_W, len * 0.3), rw = Math.min(RIM_W, len * 0.4);
       const o = 0.004;
-      const sa = m.vert(x1 + nx * o, 0, z1 + nz * o, nx, 0, nz, ink), sb = m.vert(x1 + nx * o + ux * cw, 0, z1 + nz * o + uz * cw, nx, 0, nz, ink);
-      const sc = m.vert(x1 + nx * o + ux * cw, top, z1 + nz * o + uz * cw, nx, 0, nz, ink), sd = m.vert(x1 + nx * o, top, z1 + nz * o, nx, 0, nz, ink);
-      m.quad(sa, sb, sc, sd, nx, 0, nz);
-      // rim lies on the roof, running inward from the edge (inward = against the wall normal)
-      const iy = top + 0.012;
-      const r0 = m.vert(x1, iy, z1, 0, 1, 0, ink), r1 = m.vert(x2, iy, z2, 0, 1, 0, ink);
-      const r2 = m.vert(x2 - nx * rw, iy, z2 - nz * rw, 0, 1, 0, ink), r3 = m.vert(x1 - nx * rw, iy, z1 - nz * rw, 0, 1, 0, ink);
-      m.quad(r0, r1, r2, r3, 0, 1, 0);
+      if (top >= CORNER_MIN_H && len >= CORNER_MIN_LEN && nx + nz > FACING_MIN) {
+        const cw = Math.min(CORNER_W, len * 0.3);
+        const sa = m.vert(x1 + nx * o, 0, z1 + nz * o, nx, 0, nz, ink), sb = m.vert(x1 + nx * o + ux * cw, 0, z1 + nz * o + uz * cw, nx, 0, nz, ink);
+        const sc = m.vert(x1 + nx * o + ux * cw, top, z1 + nz * o + uz * cw, nx, 0, nz, ink), sd = m.vert(x1 + nx * o, top, z1 + nz * o, nx, 0, nz, ink);
+        m.quad(sa, sb, sc, sd, nx, 0, nz);
+        m.off(sb, ux * cw, uz * cw);
+        m.off(sc, ux * cw, uz * cw);
+      }
+      if (len >= RIM_MIN_LEN) {
+        // rim lies on the roof, running inward from the edge (inward = against the wall normal)
+        const rw = Math.min(RIM_W, len * 0.4);
+        const iy = top + 0.012;
+        const r0 = m.vert(x1, iy, z1, 0, 1, 0, ink), r1 = m.vert(x2, iy, z2, 0, 1, 0, ink);
+        const r2 = m.vert(x2 - nx * rw, iy, z2 - nz * rw, 0, 1, 0, ink), r3 = m.vert(x1 - nx * rw, iy, z1 - nz * rw, 0, 1, 0, ink);
+        m.quad(r0, r1, r2, r3, 0, 1, 0);
+        m.off(r2, -nx * rw, -nz * rw);
+        m.off(r3, -nx * rw, -nz * rw);
+      }
     }
   });
   span.vWall = m.pos.length / 3;
@@ -487,6 +531,8 @@ export type RealTown = {
   /** Cheap per-turn change: hides buildings under the cafes and lowers their neighbours. */
   update: (cafes: CafeSpot[]) => void;
   stats: () => { buildings: number; triangles: number };
+  /** Keep ink lines a similar pixel width at any camera zoom (call each frame; cheap uniform write). */
+  setZoom: (zoom: number) => void;
   dispose: () => void;
 };
 
@@ -504,10 +550,15 @@ export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts
   const allIdx = Uint32Array.from(index.array as Uint32Array);
   const heights = new Float32Array(buildings.map((b) => b.h));
 
-  const buildingMesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const inkUniform = { value: 1 };
+  const buildingMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  patchInk(buildingMat, inkUniform);
+  const buildingMesh = new THREE.Mesh(geometry, buildingMat);
   buildingMesh.frustumCulled = false;
   const flatGeo = buildFlat(snapshot, palette);
-  const flatMesh = new THREE.Mesh(flatGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const flatMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  patchInk(flatMat, inkUniform);
+  const flatMesh = new THREE.Mesh(flatGeo, flatMat);
   flatMesh.frustumCulled = false;
   const group = new THREE.Group();
   group.add(flatMesh, buildingMesh);
@@ -551,6 +602,9 @@ export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts
     streets: streetsForLife(snapshot).filter((st) => st.length >= LIFE_MIN_UNITS).slice(0, LIFE_STREETS),
     drawCalls: 2,
     update,
+    setZoom: (zoom) => {
+      inkUniform.value = inkScale(zoom);
+    },
     stats: () => ({
       buildings: buildings.length,
       triangles: (geometry.drawRange.count + (flatGeo.getIndex()?.count ?? 0)) / 3,

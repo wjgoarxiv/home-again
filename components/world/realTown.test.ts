@@ -6,6 +6,7 @@ import {
   buildRealTown,
   buildingsForScene,
   heightUnits,
+  inkScale,
   loadGeo,
   sceneBuildings,
   slugOf,
@@ -301,5 +302,32 @@ describe("loadGeo", () => {
     expect(await loadGeo("Offline, New York")).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ nope: 1 }) })));
     expect(await loadGeo("Garbage, New York")).toBeNull();
+  });
+});
+
+describe("ink LOD", () => {
+  // The target is building id 3 (no rooftop detail for that id); three tiny filler buildings (10 triangles each, no ink) come first.
+  const filler = { h: 400, rings: [box(20, 0, 0.2)] };
+  const tris = (rings: number[][], h: number) =>
+    buildRealTown(snap([filler, filler, filler, { h, rings }]), FALLBACK_PALETTE, { setback: 0 }).buildingMesh.geometry.getIndex()!.count / 3 - 30;
+
+  it("gives a tall long-edged box roof, walls, a rim per edge and a strip on its two camera-facing walls only", () => {
+    expect(tris([box(0, 0, 3)], 400)).toBe(2 + 4 * 2 + 4 * 2 + 2 * 2);
+  });
+
+  it("skips ink on edges too short to read, and corner strips on low buildings", () => {
+    expect(tris([box(0, 0, 0.2)], 400)).toBe(2 + 4 * 2);
+    expect(tris([box(0, 0, 3)], 60)).toBe(2 + 4 * 2 + 4 * 2);
+  });
+
+  it("scales ink width down as the camera zooms in, clamped, and tags ink vertices for the shader", () => {
+    expect(inkScale(1)).toBe(1);
+    expect(inkScale(5)).toBeLessThan(inkScale(2));
+    expect(inkScale(0.01)).toBe(1.6);
+    expect(inkScale(100)).toBe(0.3);
+    const a = buildRealTown(snap([{ h: 400, rings: [box(0, 0, 3)] }]), FALLBACK_PALETTE, { setback: 0 }).buildingMesh.geometry.getAttribute("aInk");
+    let moving = 0;
+    for (let i = 0; i < a.count; i++) if (a.getX(i) !== 0 || a.getZ(i) !== 0) moving++;
+    expect(moving).toBeGreaterThanOrEqual(4 * 2 + 2 * 2);
   });
 });

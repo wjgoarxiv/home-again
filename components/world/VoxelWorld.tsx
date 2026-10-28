@@ -450,6 +450,7 @@ export default function VoxelWorld({
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
       ghosts.sync();
+      st.realTown?.setZoom(camera.zoom);
       renderer.render(root, camera);
       container.dataset.draws = String(renderer.info.render.calls);
       container.dataset.tris = String(renderer.info.render.triangles);
