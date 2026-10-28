@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { compactLabel, fitScene } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
+import { buildTown, planTown, seedFromString, type TownCafe, type TownPalette } from "./town";
+import { createLife, type LifeHandle } from "./life";
+import type { Street } from "../../lib/life";
 
 export type VoxelWorldProps = {
   scene: Scene;
@@ -17,19 +20,21 @@ type Palette = {
   accent: string;
   accent2: string;
   support: string;
+  supportInk: string;
   ink2: string;
   line: string;
+  lineStrong: string;
+  accentWash: string;
   surface: string;
   sunken: string;
 };
 
 type Label = { id: string; n: number; name: string; distanceM: number; left: number; top: number };
 
-const HALF = 80;
-const CELL = 4;
 const VOX = 1.8;
 const VOX_H = 1;
 const GREY = "#8b8e89";
+const LOT_Y = 0.22;
 
 function readPalette(): Palette {
   const css = (name: string, fallback: string) => {
@@ -40,34 +45,42 @@ function readPalette(): Palette {
     accent: css("--c-accent", "#c8370c"),
     accent2: css("--c-accent-2", "#1559b8"),
     support: css("--c-support", "#cfe6c7"),
+    supportInk: css("--c-support-ink", "#1d4a17"),
     ink2: css("--c-ink-2", "#2f322f"),
     line: css("--c-line", "#c3c5bf"),
+    lineStrong: css("--c-line-strong", "#3a3d3a"),
+    accentWash: css("--c-accent-wash", "#f3dccf"),
     surface: css("--c-surface", "#f4f4f1"),
     sunken: css("--c-sunken", "#dadbd6"),
   };
 }
 
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+function townPalette(p: Palette): TownPalette {
+  return {
+    base: p.sunken,
+    road: "#262926",
+    marking: "#e6e7e0",
+    cross: "#d8d9d2",
+    side: p.surface,
+    grass: p.support,
+    path: p.ink2,
+    wallA: p.surface,
+    wallB: p.lineStrong,
+    brick: p.accentWash,
+    roof: p.line,
+    detail: p.line,
+    store: p.support,
+    windowDark: "#161a15",
+    windowLitA: p.accent2,
+    windowLitB: p.accent,
+    trunk: "#4a3f33",
+    canopy: p.supportInk,
+    pole: p.line,
+    lampHead: p.accent2,
+    bench: p.line,
+    signalA: "#b0131a",
+    signalB: "#1d6b2c",
   };
-}
-
-function cellHash(cx: number, cz: number): number {
-  return (Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663)) >>> 0;
-}
-
-/** Deterministic ground height: streets sit low, blocks step up slightly. */
-function heightAt(x: number, z: number): number {
-  const cx = Math.floor((x + HALF) / CELL);
-  const cz = Math.floor((z + HALF) / CELL);
-  if (cx % 5 === 4 || cz % 5 === 4) return 0.05;
-  return 0.4 + (cellHash(cx, cz) % 3) * 0.3;
 }
 
 function roleColor(tower: Tower, palette: Palette): string {
@@ -137,35 +150,6 @@ function place(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: nu
   mesh.setColorAt(i, new THREE.Color(color));
 }
 
-/** One instanced street grid: blocks with slight height variation, streets between them. */
-function buildGround(palette: Palette): THREE.InstancedMesh {
-  const rng = mulberry32(20261028);
-  const n = Math.floor((HALF * 2) / CELL);
-  const cells: { x: number; z: number; top: number; street: boolean }[] = [];
-  for (let ix = 0; ix < n; ix++) {
-    for (let iz = 0; iz < n; iz++) {
-      const street = ix % 5 === 4 || iz % 5 === 4;
-      const x = -HALF + (ix + 0.5) * CELL;
-      const z = -HALF + (iz + 0.5) * CELL;
-      const jitter = street ? 0 : rng() * 0.15;
-      cells.push({ x, z, top: heightAt(x, z) + jitter, street });
-    }
-  }
-  const mesh = boxMesh(cells.length, palette.surface);
-  const base = new THREE.Color(palette.surface);
-  cells.forEach((c, i) => {
-    const w = c.street ? CELL * 0.55 : CELL * 0.92;
-    const h = Math.max(c.top, 0.1);
-    const color = c.street
-      ? palette.sunken
-      : `#${base.clone().offsetHSL(0, 0, ((cellHash(i, 7) % 100) / 100 - 0.5) * 0.03).getHexString()}`;
-    place(mesh, i, c.x, c.top - h / 2, c.z, w, h, w, color);
-  });
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  return mesh;
-}
-
 export default function VoxelWorld({ scene, selectedId, onSelect, loading, onReady }: VoxelWorldProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onSelectRef = useRef(onSelect);
@@ -208,6 +192,13 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     lastFocus: string | null;
     applyFit: () => void;
     renderNow: () => void;
+    life: LifeHandle | null;
+    lifeRaf: number;
+    lastT: number;
+    labelKey: string;
+    visible: boolean;
+    densityBucket: number;
+    streets: Street[];
   } | null>(null);
 
   useEffect(() => {
@@ -233,7 +224,6 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(60, 120, 20);
     root.add(key);
-    root.add(buildGround(palette));
 
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     const target = new THREE.Vector3(0, 0, 0);
@@ -259,6 +249,13 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       lastFocus: null,
       applyFit: () => {},
       renderNow: () => {},
+      life: null as LifeHandle | null,
+      lifeRaf: 0,
+      lastT: 0,
+      labelKey: "",
+      visible: true,
+      densityBucket: -1,
+      streets: [],
     };
     threeRef.current = st;
 
@@ -285,6 +282,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
       renderer.render(root, camera);
+      container.dataset.draws = String(renderer.info.render.calls);
       updateLabels();
     };
 
@@ -306,12 +304,18 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
           top: clamp((-v.y * 0.5 + 0.5) * h, 24, h - 24),
         };
       });
-      setLabels(next);
       v.set(current.home.x, 7, current.home.z).project(camera);
       const hx = (v.x * 0.5 + 0.5) * w;
       const hy = (-v.y * 0.5 + 0.5) * h;
+      const docked = hx < 0 || hx > w || hy < 0 || hy > h;
+      const key =
+        next.map((l) => `${l.id}:${Math.round(l.left)}:${Math.round(l.top)}`).join("|") +
+        `#${Math.round(hx)}:${Math.round(hy)}`;
+      if (key === st.labelKey) return;
+      st.labelKey = key;
+      setLabels(next);
       setHomeLabel(
-        hx < 0 || hx > w || hy < 0 || hy > h
+        docked
           ? {
               ...(hx <= w / 2 ? { left: 8 } : { right: 8 }),
               ...(hy <= h / 2 ? { top: 8 } : { bottom: 8 }),
@@ -329,6 +333,64 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     (st as { updateLabels?: () => void }).updateLabels = updateLabels;
 
     const renderNow = () => (threeRef.current as unknown as { render: () => void }).render();
+    st.renderNow = renderNow;
+
+    const densityOf = () => (container.clientWidth || 1) >= 1024 ? 1 : 0.5;
+    const stopLoop = () => {
+      if (st.lifeRaf) {
+        cancelAnimationFrame(st.lifeRaf);
+        st.lifeRaf = 0;
+      }
+    };
+    const setupLife = () => {
+      if (st.reduced) return;
+      const bucket = densityOf();
+      if (st.life && bucket === st.densityBucket) return;
+      if (st.life) {
+        st.life.dispose();
+        st.life = null;
+      }
+      stopLoop();
+      st.densityBucket = bucket;
+      if (!threeRef.current) return;
+      const current = sceneRef.current;
+      st.life = createLife({
+        scene: root,
+        streets: st.streets,
+        spots: current.towers.map((t) => ({ id: t.id, x: t.x, z: t.z, height: t.height })),
+        seed: seedFromString(current.home.label),
+        density: bucket,
+        palette: {
+          car: [palette.accent, palette.accent2, "#5a5e5a"],
+          person: [palette.ink2, "#6b6e6a", palette.support],
+          steam: "#ffffff",
+          bird: palette.ink2,
+        },
+      });
+      if (st.visible && !document.hidden) startLoop();
+    };
+    const startLoop = () => {
+      if (st.reduced || !st.life || st.lifeRaf || !st.visible || document.hidden) return;
+      st.lastT = performance.now();
+      let frames = 0;
+      let ema = 60;
+      const loop = (now: number) => {
+        if (!threeRef.current || !st.life) {
+          st.lifeRaf = 0;
+          return;
+        }
+        st.lifeRaf = requestAnimationFrame(loop);
+        const dt = Math.min((now - st.lastT) / 1000, 0.1);
+        st.lastT = now;
+        if (dt > 0) ema = ema * 0.95 + (1 / dt) * 0.05;
+        frames++;
+        if (frames % 60 === 0) container.dataset.fps = String(Math.round(ema));
+        st.life.update(dt);
+        render();
+      };
+      st.lifeRaf = requestAnimationFrame(loop);
+    };
+    (st as { setupLife?: () => void }).setupLife = () => void setupLife();
 
     const onPointerDown = (e: PointerEvent) => {
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -386,11 +448,29 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     const observer = new ResizeObserver(() => {
       fit();
       renderNow();
+      void setupLife();
     });
     observer.observe(container);
+    const viewObserver = new IntersectionObserver(
+      (entries) => {
+        st.visible = entries.some((e) => e.isIntersecting);
+        if (st.visible && !document.hidden) startLoop();
+        else if (!st.visible) stopLoop();
+      },
+      { threshold: 0 },
+    );
+    viewObserver.observe(container);
+    const onVisibility = () => {
+      if (document.hidden) stopLoop();
+      else if (st.visible) startLoop();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       observer.disconnect();
+      viewObserver.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
+      stopLoop();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
@@ -400,6 +480,10 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       if (stNow) {
         if (stNow.scanTimer !== null) window.clearInterval(stNow.scanTimer);
         stNow.stepTimers.forEach((t) => window.clearTimeout(t));
+        if (stNow.life) {
+          stNow.life.dispose();
+          stNow.life = null;
+        }
       }
       root.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
@@ -478,6 +562,24 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     st.tops = new Map();
     st.bases = new Map();
 
+    const cafes: TownCafe[] = scene.towers.map((t) => {
+      const count = towerVoxels(t, palette).count;
+      return {
+        x: t.x,
+        z: t.z,
+        clear: count <= 3 ? 7.5 : count <= 5 ? 6 : 4.5,
+        cap: Math.min(6, Math.max(2, count)),
+      };
+    });
+    const townPlan = planTown({
+      seed: seedFromString(scene.home.label),
+      half: 90,
+      cafes,
+      ringRadii: scene.rings.map((r) => r.radiusUnits),
+    });
+    st.streets = townPlan.streets;
+    content.add(buildTown(townPlan, townPalette(palette), cafes).group);
+
     const targets = new Map<string, { count: number; colors: string[]; marker: boolean }>();
     for (const tower of scene.towers) targets.set(tower.id, towerVoxels(tower, palette));
 
@@ -503,7 +605,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         const spec = targets.get(tower.id);
         if (!spec) continue;
         const n = counts.get(tower.id) ?? 0;
-        const base = heightAt(tower.x, tower.z);
+        const base = LOT_Y;
         st.bases.set(tower.id, base);
         for (let v = 0; v < n; v++) {
           place(mesh, i, tower.x, base + v * VOX_H + VOX_H / 2, tower.z, VOX, VOX_H, VOX, spec.colors[Math.min(v, spec.colors.length - 1)] ?? palette.ink2);
@@ -560,7 +662,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
           const f = (s + 1) / (segs + 1);
           const x = scene.home.x + (tower.x - scene.home.x) * f;
           const z = scene.home.z + (tower.z - scene.home.z) * f;
-          const y = 6 + (top - 6) * f;
+          const y = Math.max(8, 6 + (top - 6) * f);
           place(mesh, i, x, y, z, 0.45, 0.45, 0.45, palette.accent);
           i++;
         }
@@ -574,7 +676,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       const segs = 10;
       const mesh = boxMesh(segs, palette.accent);
       mesh.userData.layer = "finale";
-      const base = heightAt(focusTower.x, focusTower.z);
+      const base = LOT_Y;
       for (let s = 0; s < segs; s++) {
         const a = (s / segs) * Math.PI * 2;
         place(
@@ -637,7 +739,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       st.scanTimer = window.setInterval(drawScan, 140);
     }
 
-    const homeBase = heightAt(scene.home.x, scene.home.z);
+    const homeBase = LOT_Y;
     const homeMesh = boxMesh(5, palette.accent2);
     homeMesh.userData.layer = "home";
     for (let v = 0; v < 5; v++) {
@@ -648,8 +750,12 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     content.add(homeMesh);
 
     st.root.add(content);
+    if (st.life) {
+      st.life.setSpots(scene.towers.map((t) => ({ id: t.id, x: t.x, z: t.z, height: t.height })));
+    }
     renderNow();
     onReadyRef.current?.();
+    ((st as unknown as { setupLife?: () => void }).setupLife ?? (() => {}))();
   }, [scene, loading]);
 
   return (
