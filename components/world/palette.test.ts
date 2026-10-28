@@ -30,6 +30,12 @@ describe("world palette", () => {
     }
   });
 
+  it("keeps the taxi and the bus away from the café accent colours too", () => {
+    for (const accent of [token("accent"), token("accent-2")]) {
+      for (const ride of [FALLBACK_PALETTE.taxi, FALLBACK_PALETTE.bus]) expect(dist(ride, accent)).toBeGreaterThanOrEqual(60);
+    }
+  });
+
   it("lets streets read against the ground and sidewalk", () => {
     expect(dist(FALLBACK_PALETTE.road, FALLBACK_PALETTE.ground)).toBeGreaterThanOrEqual(80);
     expect(dist(FALLBACK_PALETTE.road, FALLBACK_PALETTE.sidewalk)).toBeGreaterThanOrEqual(60);
