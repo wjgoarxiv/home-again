@@ -24,6 +24,12 @@ export type TownPalette = {
   bench: string;
   signalA: string;
   signalB: string;
+  /** Wall tones, picked per building; falls back to wallA/wallB (brick for brownstones). */
+  facades?: string[];
+  /** Roof slab tones; falls back to `roof`. */
+  roofs?: string[];
+  /** Storefront awning stripes (alternating); no awnings when absent. */
+  awning?: string[];
 };
 
 type Piece = { x: number; y: number; z: number; sx: number; sy: number; sz: number; c?: string };
@@ -266,6 +272,45 @@ export function planTown(opts: TownOptions): TownPlan {
   return { half, streets, blocks, buildings, trees, lamps, benches, signals, crossings, park };
 }
 
+export type RoofKind = "flat" | "setback" | "pitched";
+export type FacadeStyle = {
+  /** Index into the facade/roof tone lists (take modulo the list length). */
+  tone: number;
+  roof: RoofKind;
+  colStep: number;
+  rowStep: number;
+  winW: number;
+  winH: number;
+  awning: boolean;
+  awningTone: number;
+  awningBack: boolean;
+};
+
+const COL_STEPS = [1.3, 1.6, 2.0];
+const ROW_STEPS = [1.8, 2.0, 2.4];
+const WIN_WIDTHS = [0.7, 0.9, 1.1];
+const WIN_HEIGHTS = [0.9, 1.2, 1.4];
+
+/** Every per-building look decision, derived from the building's position so the plan's random stream is untouched. */
+export function facadeStyle(b: Building): FacadeStyle {
+  const h = (k: number) => hash2(Math.round(b.x * 10) + k * 7919, Math.round(b.z * 10) + k * 104729);
+  const roll = h(2) % 3;
+  const roof: RoofKind = roll === 1 && b.h >= 5 ? "setback" : roll === 2 && b.h <= 7 ? "pitched" : "flat";
+  return {
+    tone: h(1) % 4096,
+    roof,
+    colStep: COL_STEPS[h(3) % 3],
+    rowStep: ROW_STEPS[h(4) % 3],
+    winW: WIN_WIDTHS[h(5) % 3],
+    winH: WIN_HEIGHTS[h(6) % 3],
+    awning: h(7) % 10 < 7,
+    awningTone: h(8) % 4096,
+    awningBack: h(9) % 2 === 0,
+  };
+}
+
+const tones = (list: string[] | undefined, fallback: string[]): string[] => (list && list.length > 0 ? list : fallback);
+
 export function buildTown(
   plan: TownPlan,
   palette: TownPalette,
@@ -313,22 +358,61 @@ export function buildTown(
 
   for (const b of plan.buildings) {
     const baseY = 0.16;
-    const wall = b.brick ? palette.brick : b.variant % 2 === 0 ? palette.wallA : palette.wallB;
+    const st = facadeStyle(b);
+    const walls = tones(palette.facades, b.brick ? [palette.brick] : [palette.wallA, palette.wallB]);
+    const roofTones = tones(palette.roofs, [palette.roof]);
+    const wall = walls[st.tone % walls.length];
+    const roofC = roofTones[st.tone % roofTones.length];
+    const top = baseY + b.h;
     at("wall").add(b.x, baseY + b.h / 2, b.z, b.w, b.h, b.d, wall);
-    at("roof").add(b.x, baseY + b.h + 0.15, b.z, b.w + 0.3, 0.3, b.d + 0.3);
     at("store").add(b.x, baseY + 0.5, b.z, b.w + 0.12, 1, b.d + 0.12);
+
+    if (st.roof === "flat") {
+      at("roof").add(b.x, top + 0.15, b.z, b.w + 0.3, 0.3, b.d + 0.3, roofC);
+      at("detail").add(b.x - b.w / 4, top + 0.55, b.z + b.d / 4, 0.8, 0.5, 0.8);
+      if (b.h >= 5 && b.variant % 3 === 0) at("detail").add(b.x + b.w / 4, top + 1.3, b.z - b.d / 4, 1.4, 2, 1.4);
+      if (b.variant % 2 === 1) {
+        // Water tank: legs, drum, cap.
+        at("detail").add(b.x + b.w / 5, top + 0.5, b.z, 0.6, 0.4, 0.6);
+        at("detail").add(b.x + b.w / 5, top + 1.3, b.z, 0.95, 1.2, 0.95);
+        at("roof").add(b.x + b.w / 5, top + 2.0, b.z, 1.1, 0.16, 1.1, roofC);
+      }
+    } else if (st.roof === "setback") {
+      const uw = b.w * 0.66;
+      const ud = b.d * 0.66;
+      const upper = walls[(st.tone + 1) % walls.length];
+      const base = top + 0.3;
+      at("roof").add(b.x, top + 0.15, b.z, b.w + 0.3, 0.3, b.d + 0.3, roofC);
+      at("wall").add(b.x, base + 0.95, b.z, uw, 1.9, ud, upper);
+      at("roof").add(b.x, base + 2.0, b.z, uw + 0.2, 0.2, ud + 0.2, roofC);
+      at("detail").add(b.x + b.w * 0.39, base + 0.2, b.z, 0.6, 0.4, 0.6);
+      for (const side of [1, -1]) at("winDark").add(b.x, base + 1.0, b.z + side * (ud / 2 + 0.06), st.winW, 1.0, 0.15);
+    } else {
+      // Stepped voxel "pitched" roof: three tiers narrowing across the shorter side.
+      const acrossX = b.w <= b.d;
+      const tier = (k: number, f: number) => {
+        const w = acrossX ? (k === 0 ? b.w + 0.3 : b.w * f) : b.w + 0.3 - k * 0.15;
+        const d = acrossX ? b.d + 0.3 - k * 0.15 : k === 0 ? b.d + 0.3 : b.d * f;
+        at("roof").add(b.x, top + 0.175 + k * 0.35, b.z, w, 0.35, d, roofC);
+      };
+      tier(0, 1);
+      tier(1, 0.7);
+      tier(2, 0.36);
+      at("detail").add(b.x + (acrossX ? b.w * 0.3 : 0), top + 1.2, b.z + (acrossX ? 0 : b.d * 0.3), 0.5, 1.0, 0.5);
+    }
+
     const faces: { nx: number; nz: number; span: number }[] = [
       { nx: 0, nz: 1, span: b.w },
       { nx: 0, nz: -1, span: b.w },
     ];
     if (b.variant % 2 === 0) faces.push({ nx: 1, nz: 0, span: b.d }, { nx: -1, nz: 0, span: b.d });
     for (const f of faces) {
-      const cols = Math.max(1, Math.floor((f.span - 1) / 1.6));
-      const rows = Math.max(1, Math.floor((b.h - 1) / 2));
+      const cols = Math.max(1, Math.floor((f.span - 1) / st.colStep));
+      const rows = Math.max(1, Math.floor((b.h - 1) / st.rowStep));
       for (let ci = 0; ci < cols; ci++) {
         for (let ri = 0; ri < rows; ri++) {
           const along = -f.span / 2 + 1 + ((ci + 0.5) * (f.span - 2)) / cols;
-          const y = baseY + 2.2 + ri * 2;
+          const y = baseY + 2.2 + ri * st.rowStep;
           if (y > baseY + b.h - 0.8) continue;
           const wx = b.x + f.nx * (b.w / 2 + 0.06) + (f.nx === 0 ? along : 0);
           const wz = b.z + f.nz * (b.d / 2 + 0.06) + (f.nz === 0 ? along : 0);
@@ -337,18 +421,25 @@ export function buildTown(
           const bucket = lit ? "winLit" : "winDark";
           const c = !lit ? undefined : roll < 6 ? palette.windowLitA : palette.windowLitB;
           const vertical = f.nx !== 0;
-          at(bucket).add(wx, y, wz, vertical ? 0.15 : 0.9, 1.2, vertical ? 0.9 : 0.15, c);
+          at(bucket).add(wx, y, wz, vertical ? 0.15 : st.winW, st.winH, vertical ? st.winW : 0.15, c);
         }
       }
     }
-    if (b.h >= 5 && b.variant % 3 === 0) {
-      at("detail").add(b.x + b.w / 4, baseY + b.h + 1.3, b.z - b.d / 4, 1.4, 2, 1.4);
-    }
-    if (b.variant % 2 === 0) {
-      at("detail").add(b.x - b.w / 4, baseY + b.h + 0.55, b.z + b.d / 4, 0.8, 0.5, 0.8);
-    }
-    if (b.h <= 6 && b.variant % 2 === 1) {
-      at("detail").add(b.x, baseY + b.h + 0.85, b.z, 1.6, 1.4, 2);
+
+    const stripes = palette.awning ?? [];
+    if (st.awning && stripes.length > 0) {
+      const n = Math.max(2, Math.floor((b.w - 0.4) / 0.55));
+      const sw = (b.w - 0.4) / n;
+      const sides = st.awningBack ? [1, -1] : [1];
+      for (const side of sides) {
+        for (let k = 0; k < n; k++) {
+          const c = stripes[(st.awningTone + (k % 2)) % stripes.length];
+          const x = b.x - b.w / 2 + 0.2 + sw * (k + 0.5);
+          const wall = b.z + side * (b.d / 2 + 0.06);
+          at("awning").add(x, baseY + 1.34, wall + side * 0.2, sw, 0.12, 0.4, c);
+          at("awning").add(x, baseY + 1.2, wall + side * 0.58, sw, 0.12, 0.36, c);
+        }
+      }
     }
   }
 
@@ -382,6 +473,7 @@ export function buildTown(
     ["wall", palette.wallA],
     ["roof", palette.roof],
     ["store", palette.store],
+    ["awning", palette.awning?.[0] ?? palette.store],
     ["winDark", palette.windowDark],
     ["winLit", palette.windowLitA],
     ["detail", palette.detail],
@@ -396,6 +488,7 @@ export function buildTown(
   for (const [name, fallback] of order) {
     const mesh = buckets[name]?.mesh(fallback) ?? null;
     if (mesh) {
+      mesh.name = name;
       group.add(mesh);
       drawCalls++;
     }
