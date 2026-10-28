@@ -291,6 +291,16 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     if (activeId) document.getElementById(`card-${activeId}`)?.scrollIntoView({ block: "nearest" });
   }, [activeId, cards, panels.sheetOpen, compact]);
 
+  /** Record a verdict; a first answer moves on to the next café still waiting for one, after a beat to see the press. */
+  function mark(id: string, v: Verdict) {
+    const first = !verdicts[id];
+    setVerdicts((s) => ({ ...s, [id]: v }));
+    if (!first) return;
+    const open = cards.filter((c) => c.entityId !== id && !verdicts[c.entityId]);
+    const next = open.find((c) => cards.indexOf(c) > cards.findIndex((x) => x.entityId === id)) ?? open[0];
+    if (next) window.setTimeout(() => select(next.entityId), 450);
+  }
+
   function cardFor(c: Card, i: number) {
     const id = c.entityId;
     const selected = activeId === id;
@@ -307,7 +317,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         disabled={busy}
         selected={selected}
         onSelect={() => select(id)}
-        onVerdict={(v) => setVerdicts((s) => ({ ...s, [id]: v }))}
+        onVerdict={(v) => mark(id, v)}
         tourVerdict={tourStep?.verdict?.id === id ? tourStep.verdict.verdict : undefined}
         travel={cardTravel}
       />
@@ -319,9 +329,11 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     cards.length > 0 && (
     <div className="ui-stack ui-stack--tight">
       <button type="button" disabled={busy || feedback.length === 0} onClick={() => turn(journey, feedback)} className="ui-btn ui-btn--primary w-full">
-        {journey.week === 3 ? "Finish the third week" : `Go to week ${journey.week + 1}`}
+        {feedback.length === 0 ? "Mark a café to continue" : journey.week === 3 ? "Finish the third week" : `Go to week ${journey.week + 1}`}
       </button>
-      <p className={hint ? "ui-meta [@media(max-height:820px)]:hidden" : "ui-meta hidden sm:block"}>Mark at least one café. Love the same one twice and it becomes your regular.</p>
+      <p className={hint ? "ui-meta ui-num [@media(max-height:820px)]:hidden" : "ui-meta ui-num hidden sm:block"} role="status">
+        {feedback.length} of {cards.length} marked · love the same café twice and it becomes your regular.
+      </p>
     </div>
   );
 

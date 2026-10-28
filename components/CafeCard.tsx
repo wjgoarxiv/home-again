@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Card, Verdict } from "@/lib/schema";
 import { formatDistance, formatTrip, type TravelChoice, type TripInfo, type TripStatus } from "@/lib/stage";
 
@@ -6,6 +7,12 @@ const VERDICTS: { value: Verdict; label: string; hint: string }[] = [
   { value: "crowded", label: "Too crowded", hint: "Sits out next week only" },
   { value: "meh", label: "Not for me", hint: "Never shown again" },
 ];
+
+/** The pressed look of the two non-primary verdicts: a washed fill and a coloured edge, so the answer reads without the label. */
+const FILLED: Record<"crowded" | "meh", CSSProperties> = {
+  crowded: { "--btn-bg": "var(--c-warning-wash)", "--btn-line": "var(--c-warning)" } as CSSProperties,
+  meh: { "--btn-bg": "var(--c-negative-wash)", "--btn-line": "var(--c-negative)" } as CSSProperties,
+};
 
 const MARK: Record<Verdict, { text: string; tag: string }> = {
   love: { text: "♥ Loved", tag: "ui-tag--accent" },
@@ -107,6 +114,43 @@ export function CafeCard({
         <span className="ui-coord ui-num shrink-0">{formatDistance(card.distanceM)}</span>
       </header>
 
+      <div className="ui-stack ui-stack--tight">
+        <span className="ui-label">shares taste with {seedName}</span>
+        <div className="flex flex-wrap gap-1">
+          {card.tasteLink.length > 0 ? card.tasteLink.map((t) => <span key={t} className="ui-tag ui-tag--accent-2">{t.toLowerCase()}</span>) : <span className="ui-meta">taste-affine on Qloo</span>}
+        </div>
+        <p className="ui-small ui-muted">{card.why}</p>
+      </div>
+
+      <fieldset disabled={disabled} className="ui-stack ui-stack--tight">
+        <legend className="ui-visually-hidden">How was {card.name}?</legend>
+        <div className="grid grid-cols-3 gap-2">
+          {VERDICTS.map((v) => {
+            const on = verdict === v.value;
+            const pressing = tourVerdict === v.value;
+            return (
+              <button
+                key={v.value}
+                type="button"
+                title={v.hint}
+                aria-pressed={on}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onVerdict(v.value);
+                }}
+                className={`ui-btn ${on && v.value === "love" ? "ui-btn--primary" : ""}${pressing ? " tour-press" : ""}`}
+                style={{ paddingInline: "var(--sp-4)", whiteSpace: "normal", lineHeight: 1.2, fontSize: "var(--fs-md)", ...(on && v.value !== "love" ? FILLED[v.value] : null) }}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="ui-meta" role="status" aria-live="polite">
+          {verdict ? VERDICTS.find((v) => v.value === verdict)?.hint : "How was it? Your pick shapes next week's list."}
+        </p>
+      </fieldset>
+
       <div className="flex gap-3">
         {card.photoUrl && (
           // eslint-disable-next-line @next/next/no-img-element -- Qloo-hosted photo, sized by the flex row
@@ -123,43 +167,9 @@ export function CafeCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1">
-        {card.tasteLink.length > 0 ? card.tasteLink.map((t) => <span key={t} className="ui-tag ui-tag--accent-2">{t.toLowerCase()}</span>) : <span className="ui-meta">taste-affine on Qloo</span>}
-      </div>
-
       {travel && <TravelSwitch travel={travel} />}
 
-      <fieldset disabled={disabled}>
-        <legend className="ui-visually-hidden">How was {card.name}?</legend>
-        <div className="grid grid-cols-3 gap-2">
-          {VERDICTS.map((v) => {
-            const on = verdict === v.value;
-            const pressing = tourVerdict === v.value;
-            return (
-              <button
-                key={v.value}
-                type="button"
-                title={v.hint}
-                aria-pressed={on}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onVerdict(v.value);
-                }}
-                className={`ui-btn ${on ? (v.value === "love" ? "ui-btn--primary" : "ui-btn--ink") : ""}${pressing ? " tour-press" : ""}`}
-                style={{ paddingInline: "var(--sp-4)", whiteSpace: "normal", lineHeight: 1.2, fontSize: "var(--fs-md)" }}
-              >
-                {v.label}
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      <div className="ui-stack ui-stack--tight">
-        <span className="ui-label">shares taste with {seedName}</span>
-        <p className="ui-small ui-muted">{card.why}</p>
-        {card.unknowns.length > 0 && <p className="ui-meta">unverified: {card.unknowns.join(", ")}</p>}
-      </div>
+      {card.unknowns.length > 0 && <p className="ui-meta">unverified: {card.unknowns.join(", ")}</p>}
     </article>
   );
 }
