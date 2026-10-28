@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { compactLabel, fitScene } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
-import { buildTown, planTown, seedFromString, type Street, type TownCafe, type TownPalette } from "./town";
+import { buildTown, planTown, seedFromString, type TownCafe, type TownPalette } from "./town";
+import { createLife, type LifeHandle } from "./life";
+import type { Street } from "../../lib/life";
 
 export type VoxelWorldProps = {
   scene: Scene;
@@ -32,30 +34,7 @@ type Label = { id: string; n: number; name: string; distanceM: number; left: num
 const VOX = 1.8;
 const VOX_H = 1;
 const GREY = "#8b8e89";
-const LOT_Y = 0.3;
-
-type Spot = { id: string; x: number; z: number; height: number };
-type LifeHandle = { update(dt: number): void; setSpots(spots: Spot[]): void; dispose(): void };
-type LifeCreate = (opts: {
-  scene: THREE.Scene;
-  streets: Street[];
-  spots: Spot[];
-  seed: number;
-  density: number;
-  palette: { car: string[]; person: string[]; steam: string; bird: string };
-}) => LifeHandle;
-
-const LIFE_SPEC = "./life";
-
-async function loadLifeCreate(): Promise<LifeCreate | null> {
-  try {
-    // @ts-ignore — components/world/life.ts lands with the life lane; absence means life stays off
-    const mod = await import(LIFE_SPEC);
-    return (mod?.createLife ?? null) as LifeCreate | null;
-  } catch {
-    return null;
-  }
-}
+const LOT_Y = 0.22;
 
 function readPalette(): Palette {
   const css = (name: string, fallback: string) => {
@@ -303,6 +282,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
       renderer.render(root, camera);
+      container.dataset.draws = String(renderer.info.render.calls);
       updateLabels();
     };
 
@@ -362,7 +342,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         st.lifeRaf = 0;
       }
     };
-    const setupLife = async () => {
+    const setupLife = () => {
       if (st.reduced) return;
       const bucket = densityOf();
       if (st.life && bucket === st.densityBucket) return;
@@ -372,19 +352,18 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       }
       stopLoop();
       st.densityBucket = bucket;
-      const create = await loadLifeCreate();
-      if (!create || !threeRef.current) return;
+      if (!threeRef.current) return;
       const current = sceneRef.current;
-      st.life = create({
+      st.life = createLife({
         scene: root,
         streets: st.streets,
         spots: current.towers.map((t) => ({ id: t.id, x: t.x, z: t.z, height: t.height })),
         seed: seedFromString(current.home.label),
         density: bucket,
         palette: {
-          car: [palette.accent, palette.accent2, palette.ink2],
-          person: [palette.ink2, palette.supportInk, palette.line],
-          steam: "#e6e7e0",
+          car: [palette.accent, palette.accent2, "#5a5e5a"],
+          person: [palette.ink2, "#6b6e6a", palette.support],
+          steam: "#ffffff",
           bird: palette.ink2,
         },
       });
@@ -393,6 +372,8 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     const startLoop = () => {
       if (st.reduced || !st.life || st.lifeRaf || !st.visible || document.hidden) return;
       st.lastT = performance.now();
+      let frames = 0;
+      let ema = 60;
       const loop = (now: number) => {
         if (!threeRef.current || !st.life) {
           st.lifeRaf = 0;
@@ -401,6 +382,9 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         st.lifeRaf = requestAnimationFrame(loop);
         const dt = Math.min((now - st.lastT) / 1000, 0.1);
         st.lastT = now;
+        if (dt > 0) ema = ema * 0.95 + (1 / dt) * 0.05;
+        frames++;
+        if (frames % 60 === 0) container.dataset.fps = String(Math.round(ema));
         st.life.update(dt);
         render();
       };

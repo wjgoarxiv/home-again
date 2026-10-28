@@ -49,10 +49,16 @@ class Bucket {
   }
 }
 
-/** Matches the life lane's Street: a street starts at (x, z) and runs `length` units along +dir. */
-export type Street = { x: number; z: number; dir: "x" | "z"; length: number; lanes: 1 | 2 };
+import type { Street } from "../../lib/life";
 
-/** Lane width in world units; the road surface spans lanes * LANE_W + 0.4 across the street start. */
+export type { Street };
+
+/**
+ * A street runs `length` units from (x, z) along +dir. The street start line is the
+ * road centreline: the surface extends +/-(lanes * LANE_W + 0.4) / 2 across it, so the
+ * life lane's cars (offset +/-0.35) and pedestrians (+/-0.6) stay on the pavement.
+ * Lane paint on the centreline is the host's call.
+ */
 export const STREET_LANE_W = 1.6;
 export const roadWidth = (lanes: 1 | 2): number => lanes * STREET_LANE_W + 0.4;
 
@@ -137,8 +143,8 @@ export function planTown(opts: TownOptions): TownPlan {
   for (let z = -80; z <= 80; z += 16) streetZs.push({ z, lanes: z % 48 === 0 ? 2 : 1 });
 
   const streets: Street[] = [
-    ...avenueXs.map((x): Street => ({ x: x - roadWidth(2) / 2, z: -half, dir: "z", length: half * 2, lanes: 2 })),
-    ...streetZs.map(({ z, lanes }): Street => ({ x: -half, z: z - roadWidth(lanes) / 2, dir: "x", length: half * 2, lanes })),
+    ...avenueXs.map((x): Street => ({ x, z: -half, dir: "z", length: half * 2, lanes: 2 })),
+    ...streetZs.map(({ z, lanes }): Street => ({ x: -half, z, dir: "x", length: half * 2, lanes })),
   ];
 
   const laneEdges = (grid: number[], lanes: (1 | 2)[]) =>
@@ -273,40 +279,40 @@ export function buildTown(
 
   for (const s of plan.streets) {
     const w = roadWidth(s.lanes);
-    const cx = s.dir === "z" ? s.x + w / 2 : s.x + s.length / 2;
-    const cz = s.dir === "z" ? s.z + s.length / 2 : s.z + w / 2;
+    const cx = s.dir === "z" ? s.x : s.x + s.length / 2;
+    const cz = s.dir === "z" ? s.z + s.length / 2 : s.z;
     const sx = s.dir === "z" ? w : s.length;
     const sz = s.dir === "z" ? s.length : w;
-    at("road").add(cx, 0.06, cz, sx, 0.12, sz);
+    at("road").add(cx, 0.0, cz, sx, 0.12, sz);
     const ex = s.dir === "z" ? 0.12 : s.length;
     const ez = s.dir === "z" ? s.length : 0.12;
     const ox = s.dir === "z" ? w / 2 - 0.15 : 0;
     const oz = s.dir === "z" ? 0 : w / 2 - 0.15;
-    at("marking").add(cx - ox, 0.13, cz - oz, ex, 0.02, ez);
-    at("marking").add(cx + ox, 0.13, cz + oz, ex, 0.02, ez);
+    at("marking").add(cx - ox, 0.07, cz - oz, ex, 0.02, ez);
+    at("marking").add(cx + ox, 0.07, cz + oz, ex, 0.02, ez);
     if (s.lanes === 2) {
       for (let d = 1.5; d < s.length - 1; d += 3) {
         const dx = s.dir === "z" ? cx : s.x + d;
         const dz = s.dir === "z" ? s.z + d : cz;
-        at("marking").add(dx, 0.13, dz, s.dir === "z" ? 0.18 : 1.2, 0.02, s.dir === "z" ? 1.2 : 0.18);
+        at("marking").add(dx, 0.07, dz, s.dir === "z" ? 0.18 : 1.2, 0.02, s.dir === "z" ? 1.2 : 0.18);
       }
     }
   }
 
-  for (const b of plan.blocks) at("side").add(b.x, 0.125, b.z, b.w, 0.25, b.d);
+  for (const b of plan.blocks) at("side").add(b.x, 0.1, b.z, b.w, 0.12, b.d);
   for (const c of plan.crossings) {
     for (let k = -2; k <= 2; k++) {
       at("cross").add(c.x + k * 0.9, 0.13, c.z, 0.5, 0.02, 2.6);
     }
   }
-  at("grass").add(plan.park.x, 0.15, plan.park.z, plan.park.w - 2, 0.3, plan.park.d - 2);
-  at("path").add(plan.park.x, 0.31, plan.park.z, plan.park.w - 2, 0.04, 2);
-  at("path").add(plan.park.x, 0.31, plan.park.z, 2, 0.04, plan.park.d - 2);
+  at("grass").add(plan.park.x, 0.12, plan.park.z, plan.park.w - 2, 0.16, plan.park.d - 2);
+  at("path").add(plan.park.x, 0.21, plan.park.z, plan.park.w - 2, 0.04, 2);
+  at("path").add(plan.park.x, 0.21, plan.park.z, 2, 0.04, plan.park.d - 2);
 
-  for (const c of cafes) at("side").add(c.x, 0.15, c.z, 7, 0.3, 7);
+  for (const c of cafes) at("side").add(c.x, 0.14, c.z, 7, 0.16, 7);
 
   for (const b of plan.buildings) {
-    const baseY = 0.25;
+    const baseY = 0.16;
     const wall = b.brick ? palette.brick : b.variant % 2 === 0 ? palette.wallA : palette.wallB;
     at("wall").add(b.x, baseY + b.h / 2, b.z, b.w, b.h, b.d, wall);
     at("roof").add(b.x, baseY + b.h + 0.15, b.z, b.w + 0.3, 0.3, b.d + 0.3);
@@ -347,22 +353,22 @@ export function buildTown(
   }
 
   for (const t of plan.trees) {
-    at("trunk").add(t.x, 0.25 + 1, t.z, 0.5, 2, 0.5);
-    at("canopy").add(t.x, 2.25 + 1.1 * t.s, t.z, 2.2 * t.s, 2 * t.s, 2.2 * t.s);
+    at("trunk").add(t.x, 0.16 + 1, t.z, 0.5, 2, 0.5);
+    at("canopy").add(t.x, 2.16 + 1.1 * t.s, t.z, 2.2 * t.s, 2 * t.s, 2.2 * t.s);
   }
   for (const l of plan.lamps) {
-    at("pole").add(l.x, 0.25 + 2.5, l.z, 0.3, 5, 0.3);
-    at("lampHead").add(l.x, 5.4, l.z, 1.2, 0.3, 0.3);
+    at("pole").add(l.x, 0.16 + 2.5, l.z, 0.3, 5, 0.3);
+    at("lampHead").add(l.x, 5.31, l.z, 1.2, 0.3, 0.3);
   }
   for (const b of plan.benches) {
     const w = b.rot === 0 ? 2 : 0.8;
     const d = b.rot === 0 ? 0.8 : 2;
-    at("bench").add(b.x, 0.9, b.z, w, 0.25, d);
+    at("bench").add(b.x, 0.81, b.z, w, 0.25, d);
   }
   for (const s of plan.signals) {
-    at("pole").add(s.x, 0.25 + 2.25, s.z, 0.35, 4.5, 0.35);
-    at("signalHead").add(s.x, 4.2, s.z, 0.5, 0.5, 0.5, palette.signalA);
-    at("signalHead").add(s.x, 3.5, s.z, 0.5, 0.5, 0.5, palette.signalB);
+    at("pole").add(s.x, 0.16 + 2.25, s.z, 0.35, 4.5, 0.35);
+    at("signalHead").add(s.x, 4.11, s.z, 0.5, 0.5, 0.5, palette.signalA);
+    at("signalHead").add(s.x, 3.41, s.z, 0.5, 0.5, 0.5, palette.signalB);
   }
 
   const order: [string, string][] = [
