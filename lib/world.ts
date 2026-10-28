@@ -1,4 +1,5 @@
 import { haversineM, type LatLng } from "./geo";
+import { rotateToGrid } from "./geomap";
 import { radiusForWeek } from "./journey";
 import type { Area, Card, JourneyState, Verdict } from "./schema";
 
@@ -8,11 +9,14 @@ export const UNIT_M = 25;
 const EARTH_RADIUS_M = 6_371_008.8;
 const rad = (deg: number) => (deg * Math.PI) / 180;
 
-export function project(area: Area, point: LatLng): { x: number; z: number } {
+/** `theta` is the street-grid bearing of a geo snapshot (meta.theta); positions are rotated like its baked coordinates. */
+export function project(area: Area, point: LatLng, theta = 0): { x: number; z: number } {
   const clean = (n: number) => (n === 0 ? 0 : n);
   const x = ((EARTH_RADIUS_M * Math.cos(rad(area.lat)) * rad(point.lng - area.lng)) / UNIT_M);
   const z = ((-EARTH_RADIUS_M * rad(point.lat - area.lat)) / UNIT_M);
-  return { x: clean(x), z: clean(z) };
+  if (theta === 0) return { x: clean(x), z: clean(z) };
+  const r = rotateToGrid(x * UNIT_M, z * UNIT_M, theta);
+  return { x: clean(r.x / UNIT_M), z: clean(r.z / UNIT_M) };
 }
 
 export function towerHeight(affinity: number | null): number {
@@ -113,10 +117,11 @@ export function buildScene(
   cards: Card[],
   verdicts: Record<string, Verdict>,
   radiusM: number = radiusForWeek(state.week),
+  theta = 0,
 ): Scene {
   const live = new Set(cards.map((c) => c.entityId));
   const towers: Tower[] = cards.map((c) => {
-    const { x, z } = project(state.area, { lat: c.lat, lng: c.lng });
+    const { x, z } = project(state.area, { lat: c.lat, lng: c.lng }, theta);
     const preview = verdicts[c.entityId];
     const status = preview !== undefined ? cafeStatus(c.entityId, state, verdicts) : c.revisit ? "revisit" : cafeStatus(c.entityId, state, verdicts);
     return {
@@ -132,7 +137,7 @@ export function buildScene(
   });
   for (const saved of state.saved) {
     if (live.has(saved.id)) continue;
-    const { x, z } = project(state.area, { lat: saved.lat, lng: saved.lng });
+    const { x, z } = project(state.area, { lat: saved.lat, lng: saved.lng }, theta);
     towers.push({
       id: saved.id,
       name: saved.name,
