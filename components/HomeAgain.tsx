@@ -120,7 +120,6 @@ const outerWidth = (el: HTMLElement) => el.offsetWidth;
 
 export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend }) {
   // After a failed live demo the run can finish on labelled sample data; every call goes through `source`.
-  const sampleBackend = useMemo(() => createFixtureBackend(), []);
   const source = useRef(backend);
   const [sample, setSample] = useState(false);
   const [journey, setJourney] = useState<JourneyState | null>(null);
@@ -284,7 +283,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   });
   /** The live demo failed: replay the whole tour on the synthetic backend, labelled as sample data. */
   function playSample() {
-    source.current = sampleBackend;
+    source.current = createFixtureBackend();
     setSample(true);
     autoplay.start();
   }
@@ -356,8 +355,8 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     setUserPanels((p) => ({ ...p, sheetOpen: !p.sheetOpen }));
   }
 
-  const statusLine = journey ? `${journey.area.name} · radius ${radiusM} m · tower height = Qloo affinity · old regular ${journey.seed.name}${busy ? " · asking Qloo…" : ""}` : "";
-  const statusShort = journey ? `${journey.area.name.split(",")[0]} · radius ${radiusM} m${busy ? " · asking Qloo…" : ""}` : "";
+  const statusLine = journey ? `${journey.area.name} · radius ${radiusM} m · tower height = Qloo affinity · old regular ${journey.seed.name}${sample ? " · sample data" : ""}${busy ? " · asking Qloo…" : ""}` : "";
+  const statusShort = journey ? `${journey.area.name.split(",")[0]} · radius ${radiusM} m${sample ? " · sample data" : ""}${busy ? " · asking Qloo…" : ""}` : "";
 
   return (
     <main className="fixed inset-0 overflow-hidden" style={{ background: "var(--c-canvas)" }}>
@@ -620,7 +619,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         )}
       </div>
 
-      <AutoplayBar tour={autoplay} sample={sample} onSample={playSample} />
+      <AutoplayBar tour={autoplay} sample={sample} onSample={backend === liveBackend ? playSample : undefined} />
     </main>
   );
 }
