@@ -8,6 +8,7 @@ import {
   initialTour,
   introStep,
   isWaiting,
+  offersSample,
   resultStep,
   stepsStillToCome,
   tourReducer,
@@ -416,7 +417,7 @@ export function WatchButton({ tour, busy }: { tour: AutoplayControls; busy: bool
 }
 
 /** Caption dock: step badge, big caption, step progress and the controls. Also draws the spotlight. */
-export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
+export function AutoplayBar({ tour, sample = false, onSample }: { tour: AutoplayControls; sample?: boolean; onSample?: () => void }) {
   const [dockHeight, dockRef] = useBoxHeight();
   const { state, step } = tour;
   const finished = state.status === "finished";
@@ -469,6 +470,7 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
                   <span className="ui-label">{finished ? "Demo complete" : step ? TARGET_LABEL[step.target] : ""}</span>
                   {tour.waiting && <span className="ui-meta">waiting for Qloo…</span>}
                   {paused && <span className="ui-meta">paused</span>}
+                  {sample && <span className="ui-tag ui-tag--warning">sample data</span>}
                 </p>
                 <p className="dock-caption" style={{ marginTop: "var(--sp-4)" }}>
                   {step?.caption}
@@ -481,6 +483,11 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
             {failed && (
               <button type="button" className="ui-btn ui-btn--primary" style={btn} onClick={tour.retry}>
                 Retry
+              </button>
+            )}
+            {onSample && offersSample(state, sample) && (
+              <button type="button" className="ui-btn" style={btn} onClick={onSample}>
+                Play it on sample data
               </button>
             )}
             {!failed && !finished && (

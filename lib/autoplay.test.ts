@@ -8,6 +8,7 @@ import {
   initialTour,
   introStep,
   isWaiting,
+  offersSample,
   planVerdicts,
   resultStep,
   tourReducer,
@@ -353,5 +354,26 @@ describe("tour machine", () => {
 
   it("reset returns to idle", () => {
     expect(tourReducer(started(), { type: "reset" })).toEqual(initialTour);
+  });
+});
+
+describe("sample-data fallback", () => {
+  const failed = tourReducer(tourReducer(initialTour, { type: "start", first: introStep({ seedName: "A", seedCity: "B", areaName: "C" }) }), { type: "fail", message: "Qloo is down" });
+
+  it("is offered only after the live demo failed", () => {
+    expect(offersSample(failed, false)).toBe(true);
+    expect(offersSample(initialTour, false)).toBe(false);
+    expect(offersSample(tourReducer(failed, { type: "retry" }), false)).toBe(false);
+  });
+
+  it("is not offered again once the run is already on sample data", () => {
+    expect(offersSample(failed, true)).toBe(false);
+  });
+
+  it("restarts the tour from the intro with the error cleared", () => {
+    const restarted = tourReducer(failed, { type: "start", first: introStep({ seedName: "A", seedCity: "B", areaName: "C" }) });
+    expect(restarted.status).toBe("playing");
+    expect(restarted.error).toBeNull();
+    expect(restarted.index).toBe(0);
   });
 });

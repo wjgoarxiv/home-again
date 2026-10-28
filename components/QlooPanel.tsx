@@ -56,7 +56,7 @@ export function QlooPanel({
       aria-busy={loading}
     >
       <button type="button" className="ui-panel__head min-h-11 w-full cursor-pointer border-0 text-left" style={{ marginBottom: open ? undefined : 0, alignItems: "center" }} aria-expanded={open} aria-controls="qloo-body" onClick={onToggle}>
-        <span className="ui-label">Qloo · week {week}</span>
+        <span className="ui-label">Qloo · week {week}{trace?.source === "fixture" ? " · sample data" : ""}</span>
         <span className="ui-coord">
           {summary} · {open ? "hide" : "show"}
         </span>

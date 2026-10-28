@@ -314,6 +314,11 @@ export function tourReducer(state: TourState, event: TourEvent): TourState {
   }
 }
 
+/** After the live demo fails, the dock may offer to finish the run on labelled sample data (once). */
+export function offersSample(state: TourState, sample: boolean): boolean {
+  return state.status === "error" && !sample;
+}
+
 /** The step on screen; nothing once the run is idle or stopped. */
 export function currentStep(state: TourState): TourStep | null {
   if (state.status === "idle" || state.status === "stopped") return null;

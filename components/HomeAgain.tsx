@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EXAMPLE } from "@/lib/areas";
+import { createFixtureBackend } from "@/lib/autoplayFixture";
 import type { JourneyBackend, TurnReply } from "@/lib/autoplay";
 import { startJourney, radiusForWeek } from "@/lib/journey";
 import type { Area, Card, JourneyState, Seed, Verdict } from "@/lib/schema";
@@ -118,6 +119,10 @@ const outerHeight = (el: HTMLElement) => el.offsetHeight;
 const outerWidth = (el: HTMLElement) => el.offsetWidth;
 
 export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend }) {
+  // After a failed live demo the run can finish on labelled sample data; every call goes through `source`.
+  const sampleBackend = useMemo(() => createFixtureBackend(), []);
+  const source = useRef(backend);
+  const [sample, setSample] = useState(false);
   const [journey, setJourney] = useState<JourneyState | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
   const [known, setKnown] = useState<Record<string, Card>>({});
@@ -170,7 +175,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     setNotice(null);
     setError(null);
     try {
-      const { ok, body } = await backend.turn(state, feedback, widen);
+      const { ok, body } = await source.current.turn(state, feedback, widen);
       if (!ok || !body.state) return fail(body.notice ?? "Something went wrong. Try again.");
       const next = body.cards ?? [];
       setJourney(body.state);
@@ -214,6 +219,8 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
 
   /** Pick another café: back to the start screen. */
   function pickAnother() {
+    source.current = backend;
+    setSample(false);
     autoplay.reset();
     resetJourney();
   }
@@ -252,7 +259,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   async function startExample() {
     resetJourney();
     try {
-      const body = await backend.resolve(EXAMPLE.name, EXAMPLE.city);
+      const body = await source.current.resolve(EXAMPLE.name, EXAMPLE.city);
       const seed = body.matches?.[0];
       if (seed) start({ ...seed, city: EXAMPLE.city }, EXAMPLE.area);
       else fail(body.notice ?? "Could not find the example café on Qloo.");
@@ -275,6 +282,13 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
       if (journey) turn(journey, Object.entries(verdicts).map(([id, verdict]) => ({ id, verdict })));
     },
   });
+  /** The live demo failed: replay the whole tour on the synthetic backend, labelled as sample data. */
+  function playSample() {
+    source.current = sampleBackend;
+    setSample(true);
+    autoplay.start();
+  }
+
   const radiusM = wide ? 1500 : journey ? radiusForWeek(journey.week) : 1000;
   const tourStep = autoplay.active ? autoplay.step : null;
   // While the demo's intro is on screen the start view stays, even if the first cards already arrived.
@@ -606,7 +620,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
         )}
       </div>
 
-      <AutoplayBar tour={autoplay} />
+      <AutoplayBar tour={autoplay} sample={sample} onSample={playSample} />
     </main>
   );
 }
