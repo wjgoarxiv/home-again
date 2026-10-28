@@ -79,6 +79,9 @@ function townPalette(w: WorldPalette): TownPalette {
     bench: w.trunk,
     signalA: w.signalRed,
     signalB: w.signalGreen,
+    facades: w.facades,
+    roofs: w.roofs,
+    awning: w.awning,
   };
 }
 
@@ -371,7 +374,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
         spots: current.towers.map((t) => ({ id: t.id, x: t.x, z: t.z, height: t.height })),
         seed: seedFromString(current.home.label),
         density: bucket,
-        palette: { car: world.cars, person: world.people, steam: world.steam, bird: world.bird },
+        palette: world,
       });
       if (st.visible && !document.hidden) startLoop();
     };
