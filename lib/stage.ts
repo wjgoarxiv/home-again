@@ -47,7 +47,7 @@ export function travelReducer(state: TravelUi, event: TravelEvent): TravelUi {
       return { ...state, to: event.id, resend: null, info: null, arrivedId: null };
     case "mode":
       if (state.mode === event.mode) return state;
-      if (state.to === null) return { ...state, mode: event.mode };
+      if (state.to === null || state.arrivedId === state.to) return { ...state, mode: event.mode };
       return { ...state, mode: event.mode, to: null, resend: state.to, info: null, arrivedId: null };
     case "resent":
       return state.resend === null ? state : { ...state, to: state.resend, resend: null };

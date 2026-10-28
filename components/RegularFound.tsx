@@ -1,6 +1,8 @@
+import type { CSSProperties } from "react";
 import type { Card } from "@/lib/schema";
-import { formatDistance } from "./CafeCard";
+import { formatDistance } from "@/lib/stage";
 
+/** The finale: a centred overlay card on top of the world, which keeps the new regular's tower in view. */
 export function RegularFound({
   card,
   seedName,
@@ -13,14 +15,16 @@ export function RegularFound({
   onPickAnother: () => void;
 }) {
   return (
-    <section className="ui-panel" aria-live="polite" data-tour="result">
+    <section className="ui-panel" style={{ "--panel-pad": "var(--sp-16)", boxShadow: "var(--shadow-overlay)" } as CSSProperties} aria-live="polite" data-tour="result">
       <header className="ui-panel__head">
         <span className="ui-label">{card ? "your new regular" : "three weeks done"}</span>
         <span className="ui-coord">result</span>
       </header>
       {card ? (
-        <div className="ui-stack">
-          <h2 className="ui-h1 break-words">{card.name}</h2>
+        <div className="ui-stack ui-stack--tight">
+          <h2 className="ui-h2 break-words" style={{ fontSize: "var(--fs-2xl)" }}>
+            {card.name}
+          </h2>
           <p className="ui-meta ui-num">
             {formatDistance(card.distanceM)} from home{card.hoursToday ? ` · today ${card.hoursToday}` : ""}
           </p>
@@ -34,12 +38,12 @@ export function RegularFound({
           </div>
         </div>
       ) : (
-        <div className="ui-stack">
-          <h2 className="ui-h2">No regular yet. Keep exploring.</h2>
+        <div className="ui-stack ui-stack--tight">
+          <h2 className="ui-h3">No regular yet. Keep exploring.</h2>
           <p className="ui-small ui-muted">A café becomes your regular once you love it twice. Start again to look further.</p>
         </div>
       )}
-      <div className="ui-cluster mt-6">
+      <div className="ui-cluster mt-4">
         <button type="button" onClick={onReplay} className="ui-btn ui-btn--primary">
           Replay with this café
         </button>

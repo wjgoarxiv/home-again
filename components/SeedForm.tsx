@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { AREAS, EXAMPLE, SEEDS } from "@/lib/areas";
 import type { Area, Seed } from "@/lib/schema";
 import { pickMatch } from "@/lib/seeds";
@@ -48,24 +48,20 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
   const area = AREAS[areaIndex];
 
   return (
-    <section id="seed-form" tabIndex={-1} className="ui-panel" aria-label="Pick your old regular café" style={{ minWidth: 0, maxWidth: "100%", outline: "none" }}>
-      <div className="ui-panel__head">
-        <h2 className="ui-panel__title">Try your own café</h2>
-        <span className="ui-label">Zero typing, one click</span>
+    <section id="seed-form" tabIndex={-1} className="ui-stack" aria-label="Pick your old regular café" style={{ minWidth: 0, maxWidth: "100%", outline: "none" }}>
+      <div>
+        <h2 className="ui-h3">Try your own café</h2>
+        <p className="ui-small ui-muted">Zero typing, one click</p>
       </div>
 
-      <p className="ui-label" style={{ marginBottom: "var(--sp-12)" }}>
-        One-click start
-      </p>
-      <div className="ui-grid" style={{ "--cols": 3 } as CSSProperties}>
+      <p className="ui-label">One-click start</p>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 200px), 1fr))" }}>
         {SEEDS.map((s) => {
           const pressed = looking && activeSeed === s.key;
           return (
-            <article key={s.key} className="ui-panel" style={{ minWidth: 0, display: "grid", gap: "var(--sp-12)", alignContent: "start" }}>
-              <div className="ui-panel__head">
-                <span className="ui-label">{s.city}</span>
-              </div>
-              <h3 className="ui-h3" style={{ overflowWrap: "anywhere" }}>
+            <article key={s.key} className="ui-callout" style={{ minWidth: 0, alignContent: "start", gap: "var(--sp-8)" }}>
+              <span className="ui-label">{s.city}</span>
+              <h3 className="ui-h4" style={{ overflowWrap: "anywhere" }}>
                 {s.name}
               </h3>
               <p className="ui-small" style={{ overflowWrap: "anywhere" }}>
@@ -86,11 +82,9 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
         })}
       </div>
 
-      <hr className="ui-rule" style={{ marginBlock: "var(--sp-24)" }} />
+      <hr className="ui-rule" />
 
-      <p className="ui-label" style={{ marginBottom: "var(--sp-12)" }}>
-        Or type your own
-      </p>
+      <p className="ui-label">Or type your own</p>
       <form
         className="grid gap-4"
         style={{ minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}
@@ -139,13 +133,13 @@ export function SeedForm({ onStart, busy }: { onStart: (seed: Seed, area: Area) 
       </form>
 
       {notice && (
-        <div role="status" className="ui-callout ui-callout--negative" style={{ marginTop: "var(--sp-16)", overflowWrap: "anywhere" }}>
+        <div role="status" className="ui-callout ui-callout--negative" style={{ overflowWrap: "anywhere" }}>
           <p>{notice}</p>
         </div>
       )}
 
       {matches && (
-        <div style={{ marginTop: "var(--sp-20)", minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }} className="grid gap-4">
+        <div style={{ minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }} className="grid gap-4">
           <p className="ui-label" style={{ marginBottom: "var(--sp-8)" }}>
             Which one is it?
           </p>

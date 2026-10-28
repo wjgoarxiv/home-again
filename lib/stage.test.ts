@@ -57,6 +57,11 @@ describe("travelReducer", () => {
     expect(run([{ type: "resent" }], s)).toMatchObject({ to: "a", resend: null, mode: "bus" });
   });
 
+  it("a mode change after arriving only stores the mode for the next trip", () => {
+    const s = run([{ type: "go", id: "a" }, { type: "trip", info: info("a") }, { type: "arrive", id: "a" }, { type: "mode", mode: "walk" }]);
+    expect(s).toMatchObject({ to: "a", resend: null, mode: "walk", arrivedId: "a" });
+  });
+
   it("choosing the mode already selected changes nothing", () => {
     const s = run([{ type: "go", id: "a" }]);
     expect(travelReducer(s, { type: "mode", mode: "auto" })).toBe(s);

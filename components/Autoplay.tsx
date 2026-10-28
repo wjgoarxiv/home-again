@@ -208,6 +208,8 @@ const TOUR_CSS = `
 @keyframes tour-fill { from { width: 0; } to { width: 100%; } }
 @keyframes tour-press { from { transform: translateY(0); } to { transform: translateY(3px); } }
 .tour-caption { animation: tour-slide 240ms steps(3, end) both; }
+.dock-caption { font-size: var(--fs-base); line-height: 1.35; min-height: calc(var(--fs-base) * 1.35 * 4); }
+@media (min-width: 768px) { .dock-caption { font-size: var(--fs-lg); min-height: calc(var(--fs-lg) * 1.35 * 3); } }
 .tour-spot { animation: tour-snap 240ms steps(3, end) both; }
 .tour-fill { animation: tour-fill ${STEP_HOLD_MS}ms steps(16, end) both; }
 .tour-fill[data-paused="true"] { animation-play-state: paused; }
@@ -228,6 +230,33 @@ function findTarget(step: TourStep): HTMLElement | null {
 
 type Box = { top: number; left: number; width: number; height: number };
 
+/** The part of `el` a person can see: clipped by any scrolling panel it sits in, and by the dock. */
+function visibleBox(el: HTMLElement, dockHeight: number): Box | null {
+  const r = el.getBoundingClientRect();
+  let { top, left, right, bottom } = r;
+  const clip = (c: { top: number; left: number; right: number; bottom: number }) => {
+    top = Math.max(top, c.top);
+    left = Math.max(left, c.left);
+    right = Math.min(right, c.right);
+    bottom = Math.min(bottom, c.bottom);
+  };
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === "auto" || oy === "scroll") clip(p.getBoundingClientRect());
+  }
+  clip({ top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight - dockHeight });
+  if (right <= left || bottom <= top) return null;
+  return { top: Math.round(top), left: Math.round(left), width: Math.round(right - left), height: Math.round(bottom - top) };
+}
+
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === "auto" || oy === "scroll") return p;
+  }
+  return null;
+}
+
 /** Outline and badge on the region the current step is about. Fixed-position, so it never changes layout. */
 function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number }) {
   const [box, setBox] = useState<Box | null>(null);
@@ -242,35 +271,29 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
     const measure = () => {
       if (!alive) return;
       const el = findTarget(stepRef.current);
-      if (!el) return setBox(null);
-      const r = el.getBoundingClientRect();
-      const next = { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) };
-      setBox((prev) => (prev && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.height === next.height ? prev : next));
+      const next = el ? visibleBox(el, dockRef.current) : null;
+      setBox((prev) => (prev === next || (prev && next && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.height === next.height) ? prev : next));
     };
-    // Bring the region into view once per step; the view may still be mounting, so wait a beat.
+    // Panels open and close as a step starts, so measure a few times while they settle.
+    const bursts = [0, 50, 120, 250, 450].map((ms) => window.setTimeout(measure, ms));
+    // The page itself never scrolls; a card or the explainer may sit below the fold of its own panel.
     const scrollTimer = window.setTimeout(() => {
       const el = findTarget(stepRef.current);
-      if (!el) return;
+      const parent = el && scrollParent(el);
+      if (!el || !parent) return;
       const r = el.getBoundingClientRect();
-      const top = 72;
-      const bottom = window.innerHeight - dockRef.current - 8;
-      if (r.top >= top && r.bottom <= bottom) return;
-      const fits = r.height <= bottom - top;
-      // A card taller than the gap keeps its verdict buttons (the bottom) in view; other regions show their top.
-      const y = fits
-        ? window.scrollY + r.top - (top + (bottom - top - r.height) / 2)
-        : stepRef.current.target === "cards"
-          ? window.scrollY + r.bottom - bottom
-          : window.scrollY + r.top - top;
-      window.scrollTo({ top: Math.max(0, y), behavior: "auto" });
+      const pr = parent.getBoundingClientRect();
+      if (r.top >= pr.top && r.bottom <= pr.bottom) return;
+      // A card taller than its panel keeps its verdict buttons (the bottom) in view.
+      el.scrollIntoView({ block: stepRef.current.target === "cards" && r.height > pr.height ? "end" : "nearest" });
       measure();
     }, 60);
-    measure();
     const poll = window.setInterval(measure, 250);
     window.addEventListener("scroll", measure, true);
     window.addEventListener("resize", measure);
     return () => {
       alive = false;
+      bursts.forEach((t) => window.clearTimeout(t));
       window.clearTimeout(scrollTimer);
       window.clearInterval(poll);
       window.removeEventListener("scroll", measure, true);
@@ -279,6 +302,8 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
   }, [id, target, focusId]);
 
   if (!box) return null;
+  // The map fills the screen, so its label sits inside the outline; other regions wear it outside, below when there is no room above.
+  const labelInside = target === "world";
   const labelBelow = box.top < 34;
   return (
     <div
@@ -300,8 +325,7 @@ function Spotlight({ step, dockHeight }: { step: TourStep; dockHeight: number })
       <span
         style={{
           position: "absolute",
-          left: -3,
-          ...(labelBelow ? { top: "100%" } : { bottom: "100%" }),
+          ...(labelInside ? { left: "50%", bottom: 0, transform: "translateX(-50%)" } : { left: -3, ...(labelBelow ? { top: "100%" } : { bottom: "100%" }) }),
           background: "var(--c-accent)",
           color: "var(--c-on-accent)",
           font: "700 13px/1 var(--font-mono)",
@@ -356,17 +380,26 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
   const { state, step } = tour;
   const finished = state.status === "finished";
   const failed = state.status === "error";
+
+  // The screen is a fixed stage, so the dock overlays it; overlays keep clear of it through this variable.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--dock-h", `${dockHeight}px`);
+    return () => {
+      root.style.removeProperty("--dock-h");
+    };
+  }, [dockHeight]);
+
   if (!tour.active && !finished) return <style>{TOUR_CSS}</style>;
 
   const total = Number(step?.badge.split("/")[1] ?? state.steps.length);
   const paused = state.status === "paused";
-  const btn = { paddingInline: "var(--sp-8)" } as const;
+  const btn = { paddingInline: "var(--sp-8)", fontSize: "var(--fs-md)" } as const;
 
   return (
     <>
       <style>{TOUR_CSS}</style>
       {step && !failed && !finished && <Spotlight step={step} dockHeight={dockHeight} />}
-      <div aria-hidden="true" style={{ height: dockHeight }} />
       <section ref={dockRef} style={BAR} aria-label="Guided demo">
         <div className="flex gap-1 px-4 pt-3 sm:px-6" aria-hidden="true">
           {Array.from({ length: total }, (_, i) => {
@@ -380,10 +413,10 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
           })}
         </div>
 
-        <div className="mx-auto grid max-w-6xl gap-3 px-4 py-3 sm:px-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="mx-auto grid max-w-6xl gap-2 px-4 py-3 sm:px-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3">
           <div key={step?.id ?? "end"} className="tour-caption min-w-0" aria-live="polite">
             {failed ? (
-              <p role="alert" style={{ fontSize: "var(--fs-lg)", lineHeight: 1.35, fontWeight: 700, color: "var(--c-negative)" }}>
+              <p role="alert" className="dock-caption" style={{ fontWeight: 700, color: "var(--c-negative)" }}>
                 The demo stopped: {state.error}
               </p>
             ) : (
@@ -396,12 +429,14 @@ export function AutoplayBar({ tour }: { tour: AutoplayControls }) {
                   {tour.waiting && <span className="ui-meta">waiting for Qloo…</span>}
                   {paused && <span className="ui-meta">paused</span>}
                 </p>
-                <p style={{ fontSize: "var(--fs-lg)", lineHeight: 1.35, marginTop: "var(--sp-4)", minHeight: "calc(var(--fs-lg) * 2.7)" }}>{step?.caption}</p>
+                <p className="dock-caption" style={{ marginTop: "var(--sp-4)" }}>
+                  {step?.caption}
+                </p>
               </>
             )}
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-flow-col auto-cols-fr gap-2 md:flex md:flex-wrap">
             {failed && (
               <button type="button" className="ui-btn ui-btn--primary" style={btn} onClick={tour.retry}>
                 Retry
