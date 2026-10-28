@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { compactLabel, fitScene } from "../../lib/world";
+import { compactLabel, fitAllScene } from "../../lib/world";
 import type { Scene, Tower } from "../../lib/world";
 import type { GeoSnapshot } from "../../lib/geomap";
 import { footprintPath } from "./realTown";
@@ -12,6 +12,8 @@ export type FlatMapProps = {
   onSelect: (id: string) => void;
   /** Real footprints, drawn as faint outlines under the plan. */
   geo?: GeoSnapshot | null;
+  /** Where the user's character stands (scene units); home (0, 0) until it has visited a café. */
+  traveller?: { x: number; z: number };
 };
 
 function roleFill(tower: Tower): string {
@@ -31,21 +33,26 @@ function roleFill(tower: Tower): string {
   }
 }
 
-export default function FlatMap({ scene, selectedId, onSelect, geo = null }: FlatMapProps) {
+export default function FlatMap({ scene, selectedId, onSelect, geo = null, traveller = { x: 0, z: 0 } }: FlatMapProps) {
   const outlines = useMemo(() => (geo ? footprintPath(geo) : ""), [geo]);
   const boxRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [box, setBox] = useState({ w: 0, h: 0, top: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const update = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    const update = () =>
+      setBox({
+        w: el.clientWidth,
+        h: el.clientHeight,
+        top: Math.max(0, parseFloat(getComputedStyle(el).getPropertyValue("--stage-inset-top")) || 0),
+      });
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  const fit = fitScene(scene);
+  const fit = fitAllScene(scene);
   const H = fit.halfSize;
   const side = Math.min(box.w, box.h);
   const ox = (box.w - side) / 2;
@@ -54,7 +61,7 @@ export default function FlatMap({ scene, selectedId, onSelect, geo = null }: Fla
   const pxx = (v: number) => ox + frac(v);
   const pxy = (v: number) => oy + frac(v);
   const clampX = (x: number) => Math.min(Math.max(x, 24), Math.max(24, box.w - 24));
-  const clampY = (y: number) => Math.min(Math.max(y, 24), Math.max(24, box.h - 24));
+  const clampY = (y: number) => Math.min(Math.max(y, 24 + box.top), Math.max(24 + box.top, box.h - 24));
   const hx = side > 0 ? pxx(scene.home.x) : 0;
   const hy = side > 0 ? pxy(scene.home.z) : 0;
   const homeDocked = side > 0 && (hx < 0 || hx > box.w || hy < 0 || hy > box.h);
@@ -66,7 +73,7 @@ export default function FlatMap({ scene, selectedId, onSelect, geo = null }: Fla
       }
     : {
         ...(hx <= box.w / 2 ? { left: 8 } : { right: 8 }),
-        ...(hy <= box.h / 2 ? { top: 8 } : { bottom: 8 }),
+        ...(hy <= box.h / 2 ? { top: 8 + box.top } : { bottom: 8 }),
       };
   const step = Math.max(4, Math.round(H / 9));
   const grid: number[] = [];
@@ -87,18 +94,6 @@ export default function FlatMap({ scene, selectedId, onSelect, geo = null }: Fla
             <line x1={-H} y1={g} x2={H} y2={g} />
           </g>
         ))}
-        {scene.rings.map((ring) => (
-          <circle
-            key={`${ring.week}-${ring.radiusUnits}`}
-            cx={0}
-            cy={0}
-            r={ring.radiusUnits}
-            fill="none"
-            stroke={ring.current ? "var(--c-accent)" : "var(--c-line-strong)"}
-            strokeWidth={ring.current ? H / 28 : H / 60}
-            strokeDasharray={`${H / 22} ${H / 30}`}
-          />
-        ))}
         {scene.beams.map((beam) => {
           const tower = scene.towers.find((t) => t.id === beam.toId);
           if (!tower) return null;
@@ -118,6 +113,13 @@ export default function FlatMap({ scene, selectedId, onSelect, geo = null }: Fla
           points={`${scene.home.x},${scene.home.z - 5} ${scene.home.x + 4},${scene.home.z + 2} ${scene.home.x - 4},${scene.home.z + 2}`}
           fill="var(--c-accent-2)"
         />
+        <g aria-hidden="true">
+          <rect x={-H / 55} y={-H / 55} width={(H / 55) * 2} height={(H / 55) * 2} fill="var(--w-home)" />
+          <polygon
+            points={`${-H / 40},${-H / 55} 0,${-H / 30} ${H / 40},${-H / 55}`}
+            fill="var(--w-home)"
+          />
+        </g>
         {scene.towers.map((tower) => {
           const sq = tower.status === "rejected" ? H / 30 : H / 45 + tower.height * (H / 110);
           const finale = scene.focusId;
@@ -147,6 +149,16 @@ export default function FlatMap({ scene, selectedId, onSelect, geo = null }: Fla
             </g>
           );
         })}
+        <rect
+          aria-hidden="true"
+          x={traveller.x - H / 90}
+          y={traveller.z - H / 90}
+          width={(H / 90) * 2}
+          height={(H / 90) * 2}
+          fill="var(--w-avatar)"
+          stroke="var(--c-ink)"
+          strokeWidth={H / 400}
+        />
       </svg>
       {side > 0 && (
         <div

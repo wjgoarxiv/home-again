@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { notFound, useSearchParams } from "next/navigation";
 import { z } from "zod";
 import { AREAS } from "../../../lib/areas";
@@ -8,7 +8,8 @@ import type { Area } from "../../../lib/schema";
 import { SavedCafeSchema, type Card, type JourneyState, type Verdict } from "../../../lib/schema";
 
 type SavedCafe = z.infer<typeof SavedCafeSchema>;
-import World from "../../../components/world/World";
+import World, { type TripInfo } from "../../../components/world/World";
+import type { TravelMode } from "../../../lib/route";
 
 const AREA_KEYS: Record<string, Area> = { ev: AREAS[0], wb: AREAS[1], wv: AREAS[2] };
 
@@ -100,11 +101,20 @@ export default function DevWorldPage() {
 
 type Stats = { draws: string; tris: string; fps: string };
 
+const MODES: (TravelMode | "auto")[] = ["auto", "walk", "taxi", "bus"];
+
 function DevWorld() {
   const key = useSearchParams().get("area") ?? "ev";
   const area = AREA_KEYS[key] ?? AREAS[0];
   const state = useMemo(() => stateFor(area), [area]);
   const cards = useMemo(() => cardsFor(area), [area]);
+  const towers = useMemo(
+    () => [
+      ...cards.map((c) => ({ id: c.entityId, name: c.name })),
+      ...savedFor(area).map((c) => ({ id: c.id, name: c.name })),
+    ],
+    [cards, area],
+  );
   const [stats, setStats] = useState<Stats>({ draws: "-", tris: "-", fps: "-" });
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -116,6 +126,24 @@ function DevWorld() {
   const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({ "ev-01": "love", "ev-02": "crowded" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [wide, setWide] = useState(false);
+  const [travelTo, setTravelTo] = useState<string | null>(null);
+  const [mode, setMode] = useState<TravelMode | "auto">("auto");
+  const [trip, setTrip] = useState<TripInfo | null>(null);
+  const [lastTrip, setLastTrip] = useState<TripInfo | null>(null);
+  const [arrived, setArrived] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(true);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const update = () => setInset(Math.ceil(el.getBoundingClientRect().bottom) + 8);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const cycle = (id: string) => {
     setVerdicts((prev) => {
@@ -129,56 +157,105 @@ function DevWorld() {
     });
   };
 
+  const readout = trip
+    ? `TRIP ${trip.mode.toUpperCase()} to ${trip.id} · ${Math.round(trip.lengthM)} m · ${trip.durationSec.toFixed(1)} s`
+    : lastTrip
+      ? `LAST TRIP ${lastTrip.mode.toUpperCase()} to ${lastTrip.id} · ${Math.round(lastTrip.lengthM)} m · ${lastTrip.durationSec.toFixed(1)} s · ARRIVED ${arrived ?? "-"}`
+      : "NO TRIP YET";
+
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col gap-4 p-4">
-      <header style={{ background: "var(--c-ink)", color: "var(--c-canvas)" }} className="px-4 py-3">
-        <p className="ui-meta" style={{ color: "var(--c-canvas)" }}>
-          DEV PREVIEW · WORLD LANE
-        </p>
-        <h1 className="ui-h2">Voxel neighbourhood</h1>
-      </header>
-      <div className="ui-cluster">
-        {cards.map((card) => (
-          <button
-            key={card.entityId}
-            type="button"
-            onClick={() => cycle(card.entityId)}
-            className="ui-btn ui-btn--sm"
-            aria-label={`Cycle verdict for ${card.name}, now ${verdicts[card.entityId] ?? "none"}`}
-          >
-            {card.name}: {verdicts[card.entityId] ?? "no verdict"}
-          </button>
-        ))}
-        <button type="button" onClick={() => setWide((w) => !w)} className="ui-btn ui-btn--sm" aria-pressed={wide}>
-          {wide ? "Radius 1500 m" : "Radius week 2"}
-        </button>
-      </div>
-      <div
-        className="relative w-full overflow-hidden"
-        style={{ height: "70vh", minHeight: 420, border: "3px solid var(--c-ink)" }}
-      >
-        <World
-          key={area.name}
-          state={state}
-          cards={cards}
-          verdicts={verdicts}
-          selectedId={selectedId}
-          onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
-          radiusM={wide ? 1500 : 700}
-          loading={false}
-        />
-      </div>
-      <p
-        className="ui-meta"
-        style={{
-          background: "var(--c-surface)",
-          border: "2px solid var(--c-line-strong)",
-          padding: "8px 12px",
+    <main className="fixed inset-0 overflow-hidden" style={{ background: "var(--c-canvas)" }}>
+      <World
+        key={area.name}
+        state={state}
+        cards={cards}
+        verdicts={verdicts}
+        selectedId={selectedId}
+        onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
+        radiusM={wide ? 1500 : 700}
+        loading={loading}
+        travelTo={travelTo}
+        travelMode={mode}
+        onTrip={(info) => {
+          setTrip(info);
+          if (info) {
+            setLastTrip(info);
+            setArrived(null);
+          }
         }}
+        onArrive={(id) => {
+          setArrived(id);
+          setTravelTo(null);
+        }}
+        fullBleed
+        insetTop={inset}
+      />
+      <div
+        ref={barRef}
+        className="ui-panel absolute z-30 grid gap-2"
+        style={{ left: 8, right: 8, top: 8, ["--panel-pad" as string]: "var(--sp-12)", maxWidth: 760 }}
       >
-        SYNTHETIC DATA ONLY · NO NETWORK · {area.name.toUpperCase()} · SELECTED {selectedId ?? "NONE"} · DRAWS {stats.draws} ·
-        TRIANGLES {stats.tris} · FPS {stats.fps}
-      </p>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="ui-btn ui-btn--sm ui-btn--quiet"
+            aria-expanded={open}
+            data-testid="toggle"
+          >
+            {open ? "Hide controls" : "Show controls"} · {area.name.split(",")[0]}
+          </button>
+          <p className="ui-meta" data-testid="readout" data-trip={trip ? trip.id : ""} data-arrived={arrived ?? ""}>
+            {readout}
+          </p>
+        </div>
+        {open && (
+          <>
+            <div className="ui-cluster" role="group" aria-label="Travel mode">
+              {MODES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className={`ui-btn ui-btn--sm${mode === m ? " ui-btn--ink" : ""}`}
+                  aria-pressed={mode === m}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            <div className="ui-cluster" role="group" aria-label="Send the traveller">
+              {towers.map((t) => (
+                <button key={t.id} type="button" onClick={() => setTravelTo(t.id)} className="ui-btn ui-btn--sm" data-send={t.id}>
+                  Send to {t.name}
+                </button>
+              ))}
+            </div>
+            <div className="ui-cluster">
+              {cards.map((card) => (
+                <button
+                  key={card.entityId}
+                  type="button"
+                  onClick={() => cycle(card.entityId)}
+                  className="ui-btn ui-btn--sm ui-btn--quiet"
+                  aria-label={`Cycle verdict for ${card.name}, now ${verdicts[card.entityId] ?? "none"}`}
+                >
+                  {card.name}: {verdicts[card.entityId] ?? "no verdict"}
+                </button>
+              ))}
+              <button type="button" onClick={() => setWide((w) => !w)} className="ui-btn ui-btn--sm ui-btn--quiet" aria-pressed={wide}>
+                {wide ? "Radius 1500 m" : "Radius week 2"}
+              </button>
+              <button type="button" onClick={() => setLoading((l) => !l)} className="ui-btn ui-btn--sm ui-btn--quiet" aria-pressed={loading}>
+                Loading chip
+              </button>
+            </div>
+            <p className="ui-meta">
+              SYNTHETIC DATA ONLY · NO NETWORK · SELECTED {selectedId ?? "NONE"} · DRAWS {stats.draws} · TRIANGLES {stats.tris} · FPS {stats.fps}
+            </p>
+          </>
+        )}
+      </div>
     </main>
   );
 }
