@@ -240,6 +240,32 @@ describe("buildScene", () => {
     const s = state({ seed: { id: "seed-1", name: "Fritz Coffee" } });
     expect(buildScene(s, [], {}).home.label).toBe("Fritz Coffee · old city");
   });
+
+  it("carries a short city-only home label for the docked beacon", () => {
+    expect(buildScene(state(), [], {}).home.short).toBe("Seoul");
+    const s = state({ seed: { id: "seed-1", name: "Fritz Coffee" } });
+    expect(buildScene(s, [], {}).home.short).toBe("old city");
+  });
+
+  it("leaves focusId null while the journey runs", () => {
+    const s = state({ shown: ["c1"], liked: ["c1"], loves: { c1: 1 } });
+    expect(buildScene(s, [card({ entityId: "c1" })], {}).focusId).toBeNull();
+  });
+
+  it("points focusId at the regular and keeps its beam when done", () => {
+    const s = state({
+      shown: [],
+      liked: ["c1"],
+      loves: { c1: 2 },
+      saved: [],
+      regular: "c1",
+      done: true,
+    });
+    const scene = buildScene(s, [card({ entityId: "c1", name: "Regular" })], {});
+    expect(scene.focusId).toBe("c1");
+    expect(scene.towers.find((t) => t.id === "c1")?.status).toBe("loved");
+    expect(scene.beams).toEqual([{ fromHome: true, toId: "c1" }]);
+  });
 });
 
 describe("fitScene", () => {
