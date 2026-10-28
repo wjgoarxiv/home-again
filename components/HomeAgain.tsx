@@ -350,8 +350,8 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
           "--stage-inset-bottom": `calc(var(--dock-h, 0px) + ${compact && !panels.sheetOpen && sheetHeight ? sheetHeight + 12 : 0}px)`,
           // Wide screens keep the Qloo column on the right, so the camera dock sits just left of it.
           "--stage-inset-right": `${!compact && stage ? qlooWidth + 12 : 0}px`,
-          // On a phone the dock would sit under the start card or the open café sheet, so it steps aside.
-          "--camera-dock-display": compact && (showStart || (panels.sheetOpen && cards.length > 0)) ? "none" : "flex",
+          // On a phone the dock would sit under the start card, the Qloo panel or the open café sheet, so it steps aside.
+          "--camera-dock-display": compact && (showStart || (stage && panels.qlooOpen) || (panels.sheetOpen && cards.length > 0)) ? "none" : "flex",
         } as CSSProperties}
       >
         <World
