@@ -865,8 +865,6 @@ export default function VoxelWorld({
         renderNow();
       } else if (e.key === "+" || e.key === "=") st.zoomBy(zoomStepFactor(1));
       else if (e.key === "-" || e.key === "_") st.zoomBy(zoomStepFactor(-1));
-      else if (e.key === "q" || e.key === "Q") st.rotate(-1);
-      else if (e.key === "e" || e.key === "E") st.rotate(1);
       else if (e.key === "0" || e.key === "Home") st.goHome();
       else return;
       e.preventDefault();
@@ -1347,9 +1345,6 @@ export default function VoxelWorld({
         </button>
         <button type="button" className="ui-btn" aria-label="Zoom out" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(zoomStepFactor(-1))}>
           &minus;
-        </button>
-        <button type="button" className="ui-btn" aria-label="Turn the view a quarter" title="Turn the view (Q / E)" style={DOCK_BTN} onClick={() => threeRef.current?.rotate(1)}>
-          &#8635;
         </button>
         <button
           type="button"
