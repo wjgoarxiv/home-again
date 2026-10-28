@@ -544,6 +544,9 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       st.applyFit();
     }
 
+    // Clear the previous turn's stepped timers first, so the focus move started below is not cancelled mid-way.
+    st.stepTimers.forEach((t) => window.clearTimeout(t));
+    st.stepTimers = [];
     const focusTower = focusId ? scene.towers.find((t) => t.id === focusId) ?? null : null;
     if (focusId !== st.lastFocus) {
       const hadFocus = st.lastFocus !== null;
@@ -581,8 +584,6 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       window.clearInterval(st.scanTimer);
       st.scanTimer = null;
     }
-    st.stepTimers.forEach((t) => window.clearTimeout(t));
-    st.stepTimers = [];
     st.scan = null;
 
     const content = new THREE.Group();

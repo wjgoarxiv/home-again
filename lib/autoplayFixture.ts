@@ -106,8 +106,12 @@ export function createFixtureBackend(opts: FixtureOptions = {}): JourneyBackend 
       const backCard = back && BY_ID.has(back) ? cardFor(BY_ID.get(back)!, next.area, true) : null;
       const cards = [...(backCard ? [backCard] : []), ...pool].slice(0, 5);
 
+      // Like the real turn API, keep a snapshot of every shown café so the finale still has towers to draw.
+      const shown = cards.map((c) => c.entityId);
+      const snapshots = cards.map((c) => ({ id: c.entityId, name: c.name, lat: c.lat, lng: c.lng, affinity: c.affinity, tags: c.tasteLink }));
+      const saved = [...next.saved.filter((s) => !shown.includes(s.id)), ...snapshots].slice(-12);
       const reply: TurnReply = {
-        state: { ...next, shown: cards.map((c) => c.entityId) },
+        state: { ...next, shown, saved },
         cards,
         notice: null,
         widenOffer: false,
