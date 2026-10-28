@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { notFound } from "next/navigation";
 import * as THREE from "three";
 import { createLife } from "../../../components/world/life";
+import { worldPalette } from "../../../components/world/palette";
 import type { Spot, Street } from "../../../lib/life";
 
 const GRID = [-15, -9, -3, 3, 9, 15];
@@ -17,29 +18,37 @@ const SPOTS: Spot[] = [
   { id: "t3", x: 0, z: 6, height: 4 },
 ];
 
-function readPalette() {
-  const css = (name: string, fallback: string) => {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || fallback;
-  };
-  return {
-    car: [css("--c-accent", "#c8370c"), css("--c-accent-2", "#1559b8"), "#5a5e5a"],
-    person: [css("--c-ink-2", "#2f322f"), "#6b6e6a", css("--c-support", "#cfe6c7")],
-    steam: "#ffffff",
-    bird: css("--c-ink-2", "#2f322f"),
-  };
-}
+const CAMERAS = {
+  wide: { pos: [34, 34, 34], look: [0, 0, 0] },
+  close: { pos: [7, 4.2, 9], look: [0, 0.6, 0] },
+} as const;
 
 export default function DevLifePage() {
   if (process.env.NODE_ENV === "production") notFound();
   const containerRef = useRef<HTMLDivElement>(null);
   const [fps, setFps] = useState<number | null>(null);
   const [staticNote, setStaticNote] = useState(false);
+  const [close, setClose] = useState(false);
+  const [density, setDensity] = useState<0 | 1>(1);
+  const closeRef = useRef(close);
+  const refitRef = useRef<() => void>(() => {});
+
+  // `?view=close` and `?density=0` open the page in that state (the interface probe cannot click).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("view") === "close") setClose(true);
+    if (q.get("density") === "0") setDensity(0);
+  }, []);
+
+  useEffect(() => {
+    closeRef.current = close;
+    refitRef.current();
+  }, [close]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const palette = readPalette();
+    const palette = worldPalette();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -54,7 +63,7 @@ export default function DevLifePage() {
     });
 
     const root = new THREE.Scene();
-    root.background = new THREE.Color(palette.person[2] ?? "#cfe6c7");
+    root.background = new THREE.Color(palette.sky);
     root.add(new THREE.AmbientLight(0xffffff, 0.8));
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(40, 80, 20);
@@ -62,12 +71,12 @@ export default function DevLifePage() {
 
     const ground = new THREE.Mesh(
       new THREE.BoxGeometry(44, 1, 44),
-      new THREE.MeshLambertMaterial({ color: "#f4f4f1" }),
+      new THREE.MeshLambertMaterial({ color: palette.ground }),
     );
     ground.position.y = -0.5;
     root.add(ground);
 
-    const streetMat = new THREE.MeshLambertMaterial({ color: "#dadbd6" });
+    const streetMat = new THREE.MeshLambertMaterial({ color: palette.road });
     for (const st of STREETS) {
       const geo =
         st.dir === "x" ? new THREE.BoxGeometry(st.length, 0.12, 1.6) : new THREE.BoxGeometry(1.6, 0.12, st.length);
@@ -76,15 +85,15 @@ export default function DevLifePage() {
       root.add(mesh);
     }
 
-    const towerMat = new THREE.MeshLambertMaterial({ color: "#2f322f" });
-    const capMat = new THREE.MeshLambertMaterial({ color: palette.car[0] });
-    for (const spot of SPOTS) {
+    const capMat = new THREE.MeshLambertMaterial({ color: palette.roofs[0] });
+    SPOTS.forEach((spot, si) => {
+      const towerMat = new THREE.MeshLambertMaterial({ color: palette.facades[si % palette.facades.length] });
       for (let v = 0; v < spot.height; v++) {
         const vox = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1, 1.8), v === spot.height - 1 ? capMat : towerMat);
         vox.position.set(spot.x, v + 0.5, spot.z);
         root.add(vox);
       }
-    }
+    });
 
     const camera = new THREE.PerspectiveCamera(40, 1, 1, 500);
     const fit = () => {
@@ -92,13 +101,18 @@ export default function DevLifePage() {
       const h = container.clientHeight || 1;
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
-      camera.position.set(34, 34, 34);
-      camera.lookAt(0, 0, 0);
+      const cam = CAMERAS[closeRef.current ? "close" : "wide"];
+      camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+      camera.lookAt(cam.look[0], cam.look[1], cam.look[2]);
       camera.updateProjectionMatrix();
     };
     fit();
+    refitRef.current = () => {
+      fit();
+      renderer.render(root, camera);
+    };
 
-    const life = createLife({ scene: root, streets: STREETS, spots: SPOTS, seed: 20261028, density: 1, palette });
+    const life = createLife({ scene: root, streets: STREETS, spots: SPOTS, seed: 20261028, density, palette });
     life.update(0);
     renderer.render(root, camera);
 
@@ -160,9 +174,10 @@ export default function DevLifePage() {
         }
       });
       renderer.dispose();
+      refitRef.current = () => {};
       if (renderer.domElement.parentElement === container) container.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [density]);
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col gap-4 p-4">
@@ -177,12 +192,32 @@ export default function DevLifePage() {
         className="relative w-full overflow-hidden"
         style={{ height: "70vh", minHeight: 420, border: "3px solid var(--c-ink)" }}
       />
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="ui-btn ui-btn--sm" aria-pressed={close} onClick={() => setClose((c) => !c)}>
+          {close ? "ZOOM OUT" : "CLOSE-UP"}
+        </button>
+        <button
+          type="button"
+          className="ui-btn ui-btn--sm"
+          aria-pressed={density === 0}
+          onClick={() => setDensity((d) => (d === 1 ? 0 : 1))}
+        >
+          {density === 1 ? "DENSITY 0" : "DENSITY 1"}
+        </button>
+      </div>
       <p
         className="ui-meta"
         style={{ background: "var(--c-surface)", border: "2px solid var(--c-line-strong)", padding: "8px 12px" }}
       >
-        SYNTHETIC DATA ONLY · NO NETWORK · {staticNote ? "STATIC (PREFERS-REDUCED-MOTION)" : `FPS ${fps ?? "…"}`} ·
-        STREETS {STREETS.length} · TOWERS {SPOTS.length} · DENSITY 1
+        <span className="block">
+          SYNTHETIC DATA ONLY · NO NETWORK · {staticNote ? "STATIC (PREFERS-REDUCED-MOTION)" : `FPS ${fps ?? "…"}`}
+        </span>
+        <span className="block">
+          STREETS {STREETS.length} · TOWERS {SPOTS.length}
+        </span>
+        <span className="block">
+          DENSITY {density} · {close ? "CLOSE-UP" : "WIDE"}
+        </span>
       </p>
     </main>
   );
