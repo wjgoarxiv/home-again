@@ -174,7 +174,7 @@ export function HomeAgain() {
         </p>
       )}
 
-      <footer className="ui-footer px-4 py-6 sm:px-6">
+      <footer className="border-t-2 border-line-strong px-4 py-6 sm:px-6">
         <p className="ui-meta">Taste data, photos and opening hours from Qloo. Seating and how busy a café is right now are not verified.</p>
       </footer>
     </div>
