@@ -1,0 +1,532 @@
+// The real neighbourhood: NYC building footprints and street centrelines (public/geo/*.json) as scene geometry.
+// Pure planning (heights, clearing around cafes, life streets) is separate from the Three build, which is
+// done ONCE per area; per-turn changes only rewrite an index range and a few heights in place.
+import * as THREE from "three";
+import type { GeoSnapshot } from "../../lib/geomap";
+import type { Street } from "../../lib/life";
+import type { WorldPalette } from "./palette";
+
+const DM_PER_UNIT = 250;
+/** Vertical scale so a 5-storey (17 m) building reads ~1.7 units: 0.1 unit per metre (2.5x the horizontal 0.04). */
+const UNITS_PER_M = 0.1;
+const UNKNOWN_HEIGHT_M = 12;
+const MIN_HEIGHT = 0.5;
+const SOFT_HEIGHT = 4;
+const MAX_HEIGHT = 7;
+const CAP_RADIUS = 11;
+
+export const slugOf = (areaName: string): string =>
+  areaName.split(",")[0].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+const isSnapshot = (v: unknown): v is GeoSnapshot => {
+  const s = v as GeoSnapshot | null;
+  return !!s && typeof s === "object" && !!s.meta && Array.isArray(s.buildings) && Array.isArray(s.streets);
+};
+
+const cache = new Map<string, Promise<GeoSnapshot | null>>();
+
+/** Fetches /geo/<slug>.json once per area; null on 404, network error or a malformed body. */
+export function loadGeo(areaName: string): Promise<GeoSnapshot | null> {
+  const slug = slugOf(areaName);
+  let p = cache.get(slug);
+  if (!p) {
+    p = (async () => {
+      try {
+        const res = await fetch(`/geo/${slug}.json`);
+        if (!res.ok) return null;
+        const body: unknown = await res.json();
+        return isSnapshot(body) ? body : null;
+      } catch {
+        return null;
+      }
+    })();
+    cache.set(slug, p);
+  }
+  return p;
+}
+
+/** Roof height in decimetres (0 = unknown) to scene units: exaggerated, soft-compressed above 4 units, clamped at 7. */
+export function heightUnits(dm: number): number {
+  const m = dm > 0 ? dm / 10 : UNKNOWN_HEIGHT_M;
+  let u = m * UNITS_PER_M;
+  if (u > SOFT_HEIGHT) u = SOFT_HEIGHT + (u - SOFT_HEIGHT) * 0.5;
+  return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, u));
+}
+
+export type SceneBuilding = {
+  /** Index in the snapshot. */
+  id: number;
+  /** Roof height in scene units. */
+  h: number;
+  /** Outer ring then holes, flat open [x, z, ...] in scene units. */
+  rings: number[][];
+  cx: number;
+  cz: number;
+  /** Bounding box [minX, minZ, maxX, maxZ]. */
+  bb: [number, number, number, number];
+  /** Distance range from the scene origin, for the ring bands. */
+  dMin: number;
+  dMax: number;
+};
+
+export type CafeSpot = { x: number; z: number; clear: number; cap: number };
+
+export type SceneOpts = {
+  /** Footprint pull-back from the street, units (default 0.15). */
+  setback?: number;
+  ringRadii?: number[];
+  /** Half width of the band around a ring that is kept low (default 1.1). */
+  ringGap?: number;
+  ringCap?: number;
+  capRadius?: number;
+};
+
+function distToRing(px: number, pz: number, ring: number[]): number {
+  const n = ring.length / 2;
+  let best = Infinity;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const ax = ring[j * 2], az = ring[j * 2 + 1], bx = ring[i * 2], bz = ring[i * 2 + 1];
+    if (az > pz !== bz > pz && px < ((bx - ax) * (pz - az)) / (bz - az) + ax) inside = !inside;
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len2));
+    best = Math.min(best, Math.hypot(px - ax - t * dx, pz - az - t * dz));
+  }
+  return inside ? 0 : best;
+}
+
+/** Every building of the snapshot in scene units with exaggerated heights; static for the whole area. */
+export function sceneBuildings(snapshot: GeoSnapshot, opts: SceneOpts = {}): SceneBuilding[] {
+  const setback = opts.setback ?? 0.15;
+  const out: SceneBuilding[] = [];
+  snapshot.buildings.forEach((src, id) => {
+    const rings = src.rings.filter((r) => r.length >= 6).map((r) => r.map((v) => v / DM_PER_UNIT));
+    if (rings.length === 0) return;
+    const outer = rings[0];
+    const n = outer.length / 2;
+    let mx = 0, mz = 0;
+    for (let i = 0; i < n; i++) {
+      mx += outer[i * 2];
+      mz += outer[i * 2 + 1];
+    }
+    mx /= n;
+    mz /= n;
+    if (setback > 0) {
+      for (const ring of rings) {
+        for (let i = 0; i < ring.length; i += 2) {
+          const rx = ring[i] - mx, rz = ring[i + 1] - mz;
+          const d = Math.hypot(rx, rz);
+          if (d === 0) continue;
+          const move = Math.min(setback, d * 0.3);
+          ring[i] -= (rx / d) * move;
+          ring[i + 1] -= (rz / d) * move;
+        }
+      }
+    }
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, dMax = 0;
+    for (let i = 0; i < n; i++) {
+      const x = outer[i * 2], z = outer[i * 2 + 1];
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z);
+      maxZ = Math.max(maxZ, z);
+      dMax = Math.max(dMax, Math.hypot(x, z));
+    }
+    out.push({
+      id,
+      h: heightUnits(src.h),
+      rings,
+      cx: (minX + maxX) / 2,
+      cz: (minZ + maxZ) / 2,
+      bb: [minX, minZ, maxX, maxZ],
+      dMin: distToRing(0, 0, outer),
+      dMax,
+    });
+  });
+  return out;
+}
+
+/** Which buildings survive the cafes and the height each gets: removed inside a cafe's clear radius, capped nearby. */
+export function applyCafes(
+  buildings: SceneBuilding[],
+  cafes: CafeSpot[],
+  opts: SceneOpts = {},
+): { keep: Uint8Array; h: Float32Array } {
+  const capRadius = opts.capRadius ?? CAP_RADIUS;
+  const gap = opts.ringGap ?? 1.1;
+  const ringCap = opts.ringCap ?? 0.9;
+  const rings = opts.ringRadii ?? [];
+  const keep = new Uint8Array(buildings.length).fill(1);
+  const h = new Float32Array(buildings.length);
+  buildings.forEach((b, i) => {
+    let height = b.h;
+    for (const r of rings) {
+      if (b.dMax >= r - gap && b.dMin <= r + gap) height = Math.min(height, ringCap);
+    }
+    for (const c of cafes) {
+      const reach = Math.max(c.clear, capRadius);
+      const bx = Math.max(b.bb[0] - c.x, 0, c.x - b.bb[2]);
+      const bz = Math.max(b.bb[1] - c.z, 0, c.z - b.bb[3]);
+      if (Math.hypot(bx, bz) >= reach) continue;
+      const d = distToRing(c.x, c.z, b.rings[0]);
+      if (d < c.clear) {
+        keep[i] = 0;
+        height = b.h;
+        break;
+      }
+      if (d < capRadius) height = Math.min(height, c.cap);
+    }
+    h[i] = height;
+  });
+  return { keep, h };
+}
+
+/** The buildings to show for these cafes, each with its final height (pure; the Three layer does the same incrementally). */
+export function buildingsForScene(snapshot: GeoSnapshot, cafes: CafeSpot[], opts: SceneOpts = {}): SceneBuilding[] {
+  const all = sceneBuildings(snapshot, opts);
+  const { keep, h } = applyCafes(all, cafes, opts);
+  const out: SceneBuilding[] = [];
+  all.forEach((b, i) => {
+    if (keep[i]) out.push({ ...b, h: h[i] });
+  });
+  return out;
+}
+
+const AXIS_TOL_DEG = 5;
+const STREET_JOIN_UNITS = 0.3;
+const STREET_GAP_UNITS = 1;
+const STREET_MIN_UNITS = 2;
+
+type Run = { c: number; a: number; b: number; l: number; w: number };
+
+/** Axis-aligned streets for the life layer: near-axis segments snapped, merged where collinear, short ones dropped. */
+export function streetsForLife(snapshot: GeoSnapshot): Street[] {
+  const runs: Record<"x" | "z", Run[]> = { x: [], z: [] };
+  for (const s of snapshot.streets) {
+    const lanes = Math.min(2, Math.max(1, Math.round(s.l)));
+    for (let i = 2; i < s.p.length; i += 2) {
+      const x1 = s.p[i - 2] / DM_PER_UNIT, z1 = s.p[i - 1] / DM_PER_UNIT;
+      const x2 = s.p[i] / DM_PER_UNIT, z2 = s.p[i + 1] / DM_PER_UNIT;
+      const dx = x2 - x1, dz = z2 - z1;
+      const len = Math.hypot(dx, dz);
+      if (len === 0) continue;
+      const deg = (Math.atan2(Math.abs(dz), Math.abs(dx)) * 180) / Math.PI;
+      if (deg <= AXIS_TOL_DEG) runs.x.push({ c: (z1 + z2) / 2, a: Math.min(x1, x2), b: Math.max(x1, x2), l: lanes, w: len });
+      else if (deg >= 90 - AXIS_TOL_DEG) runs.z.push({ c: (x1 + x2) / 2, a: Math.min(z1, z2), b: Math.max(z1, z2), l: lanes, w: len });
+    }
+  }
+  const out: Street[] = [];
+  for (const dir of ["x", "z"] as const) {
+    const sorted = runs[dir].sort((p, q) => p.c - q.c);
+    const clusters: { mean: number; wsum: number; items: Run[] }[] = [];
+    for (const r of sorted) {
+      const last = clusters[clusters.length - 1];
+      if (last && Math.abs(r.c - last.mean) <= STREET_JOIN_UNITS) {
+        last.mean = (last.mean * last.wsum + r.c * r.w) / (last.wsum + r.w);
+        last.wsum += r.w;
+        last.items.push(r);
+      } else clusters.push({ mean: r.c, wsum: r.w, items: [r] });
+    }
+    for (const cl of clusters) {
+      const items = cl.items.sort((p, q) => p.a - q.a);
+      let cur: { a: number; b: number; l: number; cw: number; w: number } | null = null;
+      const flush = () => {
+        if (!cur || cur.b - cur.a < STREET_MIN_UNITS) return;
+        const c = cur.cw / cur.w;
+        out.push(
+          dir === "x"
+            ? { x: cur.a, z: c, dir, length: cur.b - cur.a, lanes: cur.l as 1 | 2 }
+            : { x: c, z: cur.a, dir, length: cur.b - cur.a, lanes: cur.l as 1 | 2 },
+        );
+      };
+      for (const r of items) {
+        if (cur && r.a - cur.b < STREET_GAP_UNITS) {
+          cur.b = Math.max(cur.b, r.b);
+          cur.l = Math.max(cur.l, r.l);
+          cur.cw += r.c * r.w;
+          cur.w += r.w;
+        } else {
+          flush();
+          cur = { a: r.a, b: r.b, l: r.l, cw: r.c * r.w, w: r.w };
+        }
+      }
+      flush();
+    }
+  }
+  return out;
+}
+
+/** One SVG path (scene units) of every footprint outline, for the flat map. */
+export function footprintPath(snapshot: GeoSnapshot): string {
+  const parts: string[] = [];
+  for (const b of sceneBuildings(snapshot, { setback: 0 })) {
+    const ring = b.rings[0];
+    let d = "";
+    for (let i = 0; i < ring.length; i += 2) d += `${i === 0 ? "M" : "L"}${ring[i].toFixed(2)} ${ring[i + 1].toFixed(2)}`;
+    parts.push(`${d}Z`);
+  }
+  return parts.join("");
+}
+
+// ---------------------------------------------------------------- Three
+
+const ROAD_BASE_W = 0.55;
+const ROAD_LANE_W = 0.2;
+const SIDEWALK_EXTRA = 0.3;
+const GROUND_HALF = 64;
+const Y_SIDEWALK = 0.015;
+const Y_ROAD = 0.03;
+const Y_MARK = 0.045;
+
+class Mesh {
+  pos: number[] = [];
+  nor: number[] = [];
+  col: number[] = [];
+  idx: number[] = [];
+  vert(x: number, y: number, z: number, nx: number, ny: number, nz: number, c: THREE.Color): number {
+    this.pos.push(x, y, z);
+    this.nor.push(nx, ny, nz);
+    this.col.push(c.r, c.g, c.b);
+    return this.pos.length / 3 - 1;
+  }
+  /** Triangle wound so its geometric normal agrees with (nx, ny, nz). */
+  tri(a: number, b: number, c: number, nx: number, ny: number, nz: number): void {
+    const p = this.pos;
+    const ux = p[b * 3] - p[a * 3], uy = p[b * 3 + 1] - p[a * 3 + 1], uz = p[b * 3 + 2] - p[a * 3 + 2];
+    const vx = p[c * 3] - p[a * 3], vy = p[c * 3 + 1] - p[a * 3 + 1], vz = p[c * 3 + 2] - p[a * 3 + 2];
+    const dot = (uy * vz - uz * vy) * nx + (uz * vx - ux * vz) * ny + (ux * vy - uy * vx) * nz;
+    if (dot >= 0) this.idx.push(a, b, c);
+    else this.idx.push(a, c, b);
+  }
+  quad(a: number, b: number, c: number, d: number, nx: number, ny: number, nz: number): void {
+    this.tri(a, b, c, nx, ny, nz);
+    this.tri(a, c, d, nx, ny, nz);
+  }
+  geometry(): THREE.BufferGeometry {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(this.nor, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(this.col, 3));
+    g.setIndex(new THREE.Uint32BufferAttribute(this.idx, 1));
+    return g;
+  }
+}
+
+function flatQuad(m: Mesh, x1: number, z1: number, x2: number, z2: number, width: number, ext: number, y: number, c: THREE.Color) {
+  const dx = x2 - x1, dz = z2 - z1;
+  const len = Math.hypot(dx, dz);
+  if (len === 0) return;
+  const ux = dx / len, uz = dz / len;
+  const px = -uz * (width / 2), pz = ux * (width / 2);
+  const ax = x1 - ux * ext, az = z1 - uz * ext, bx = x2 + ux * ext, bz = z2 + uz * ext;
+  const v0 = m.vert(ax + px, y, az + pz, 0, 1, 0, c);
+  const v1 = m.vert(bx + px, y, bz + pz, 0, 1, 0, c);
+  const v2 = m.vert(bx - px, y, bz - pz, 0, 1, 0, c);
+  const v3 = m.vert(ax - px, y, az - pz, 0, 1, 0, c);
+  m.quad(v0, v1, v2, v3, 0, 1, 0);
+}
+
+/** Ground slab, sidewalks, road ribbons and centre dashes as ONE vertex-coloured mesh (stacked a hair apart). */
+function buildFlat(snapshot: GeoSnapshot, p: WorldPalette): THREE.BufferGeometry {
+  const m = new Mesh();
+  const ground = new THREE.Color(p.ground);
+  const side = new THREE.Color(p.sidewalk);
+  const road = new THREE.Color(p.road);
+  const mark = new THREE.Color(p.marking);
+  const h = GROUND_HALF;
+  const slab = 0.5;
+  const t = [m.vert(-h, 0, -h, 0, 1, 0, ground), m.vert(h, 0, -h, 0, 1, 0, ground), m.vert(h, 0, h, 0, 1, 0, ground), m.vert(-h, 0, h, 0, 1, 0, ground)];
+  m.quad(t[0], t[1], t[2], t[3], 0, 1, 0);
+  const wall = (x1: number, z1: number, x2: number, z2: number, nx: number, nz: number) => {
+    const a = m.vert(x1, 0, z1, nx, 0, nz, side), b = m.vert(x2, 0, z2, nx, 0, nz, side);
+    const c = m.vert(x2, -slab, z2, nx, 0, nz, side), d = m.vert(x1, -slab, z1, nx, 0, nz, side);
+    m.quad(a, b, c, d, nx, 0, nz);
+  };
+  wall(-h, h, h, h, 0, 1);
+  wall(h, h, h, -h, 1, 0);
+  wall(h, -h, -h, -h, 0, -1);
+  wall(-h, -h, -h, h, -1, 0);
+
+  const inside = (x: number, z: number) => Math.abs(x) < h && Math.abs(z) < h;
+  for (const pass of ["side", "road", "mark"] as const) {
+    for (const s of snapshot.streets) {
+      const w = ROAD_BASE_W + ROAD_LANE_W * Math.min(4, Math.max(1, s.l));
+      for (let i = 2; i < s.p.length; i += 2) {
+        const x1 = s.p[i - 2] / DM_PER_UNIT, z1 = s.p[i - 1] / DM_PER_UNIT;
+        const x2 = s.p[i] / DM_PER_UNIT, z2 = s.p[i + 1] / DM_PER_UNIT;
+        if (!inside(x1, z1) || !inside(x2, z2)) continue;
+        if (pass === "side") flatQuad(m, x1, z1, x2, z2, w + SIDEWALK_EXTRA, (w + SIDEWALK_EXTRA) / 2, Y_SIDEWALK, side);
+        else if (pass === "road") flatQuad(m, x1, z1, x2, z2, w, w / 2, Y_ROAD, road);
+        else if (s.l >= 2) {
+          const deg = (Math.atan2(Math.abs(z2 - z1), Math.abs(x2 - x1)) * 180) / Math.PI;
+          if (deg > AXIS_TOL_DEG && deg < 90 - AXIS_TOL_DEG) continue;
+          const len = Math.hypot(x2 - x1, z2 - z1);
+          if (len === 0) continue;
+          const ux = (x2 - x1) / len, uz = (z2 - z1) / len;
+          for (let d = 0.25; d + 0.5 <= len - 0.25; d += 1) {
+            flatQuad(m, x1 + ux * d, z1 + uz * d, x1 + ux * (d + 0.5), z1 + uz * (d + 0.5), 0.07, 0, Y_MARK, mark);
+          }
+        }
+      }
+    }
+  }
+  return m.geometry();
+}
+
+type Span = { v0: number; vWall: number; vEnd: number; i0: number; iEnd: number; h0: number };
+
+const hash = (a: number, b: number): number => (Math.imul(a + 1, 2654435761) ^ Math.imul(b + 7, 40503)) >>> 0;
+
+function addBuilding(m: Mesh, b: SceneBuilding, p: WorldPalette): Span {
+  const span: Span = { v0: m.pos.length / 3, vWall: 0, vEnd: 0, i0: m.idx.length, iEnd: 0, h0: b.h };
+  const band = Math.floor(b.h / 1.5);
+  const wallCol = new THREE.Color(p.facades[hash(b.id, band) % p.facades.length]);
+  const roofCol = new THREE.Color(p.roofs[hash(b.id, 3) % p.roofs.length]);
+  const top = b.h;
+
+  // Roof: triangulate the footprint (with holes); every triangle is wound to face up.
+  try {
+    const contour: THREE.Vector2[] = [];
+    const holeRings: THREE.Vector2[][] = [];
+    b.rings.forEach((ring, ri) => {
+      const pts: THREE.Vector2[] = [];
+      for (let i = 0; i < ring.length; i += 2) pts.push(new THREE.Vector2(ring[i], ring[i + 1]));
+      if (ri === 0) contour.push(...pts);
+      else holeRings.push(pts);
+    });
+    const tris = THREE.ShapeUtils.triangulateShape(contour, holeRings);
+    const first = m.pos.length / 3;
+    for (const ring of b.rings) {
+      for (let i = 0; i < ring.length; i += 2) m.vert(ring[i], top, ring[i + 1], 0, 1, 0, roofCol);
+    }
+    for (const t of tris) m.tri(first + t[0], first + t[1], first + t[2], 0, 1, 0);
+  } catch {
+    // a degenerate footprint keeps its walls and loses its roof
+  }
+  // Walls: one quad per edge, normal pointing away from the solid (holes face into the courtyard).
+  b.rings.forEach((ring, ri) => {
+    const n = ring.length / 2;
+    let area = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      area += ring[i * 2] * ring[j * 2 + 1] - ring[j * 2] * ring[i * 2 + 1];
+    }
+    const sign = (area >= 0 ? 1 : -1) * (ri === 0 ? 1 : -1);
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const x1 = ring[i * 2], z1 = ring[i * 2 + 1], x2 = ring[j * 2], z2 = ring[j * 2 + 1];
+      const dx = x2 - x1, dz = z2 - z1;
+      const len = Math.hypot(dx, dz);
+      if (len < 1e-4) continue;
+      const nx = (dz / len) * sign, nz = (-dx / len) * sign;
+      const a = m.vert(x1, 0, z1, nx, 0, nz, wallCol), c = m.vert(x2, 0, z2, nx, 0, nz, wallCol);
+      const d = m.vert(x2, top, z2, nx, 0, nz, wallCol), e = m.vert(x1, top, z1, nx, 0, nz, wallCol);
+      m.quad(a, c, d, e, nx, 0, nz);
+    }
+  });
+  span.vWall = m.pos.length / 3;
+
+  // Rooftop detail on ~13% of the taller footprints that are big enough and whose centre is really inside.
+  const w = b.bb[2] - b.bb[0], depth = b.bb[3] - b.bb[1];
+  if (hash(b.id, 11) % 100 < 13 && b.h >= 0.8 && w > 0.9 && depth > 0.9 && distToRing(b.cx, b.cz, b.rings[0]) === 0) {
+    const s = 0.28 + (hash(b.id, 5) % 20) / 100;
+    const dh = 0.25 + (hash(b.id, 9) % 30) / 100;
+    const col = new THREE.Color(p.roofs[(hash(b.id, 3) + 1) % p.roofs.length]);
+    const x0 = b.cx - s / 2, x1 = b.cx + s / 2, z0 = b.cz - s / 2, z1 = b.cz + s / 2, y1 = top + dh;
+    const sides: [number, number, number, number, number, number][] = [
+      [x0, z1, x1, z1, 0, 1],
+      [x1, z0, x0, z0, 0, -1],
+      [x1, z1, x1, z0, 1, 0],
+      [x0, z0, x0, z1, -1, 0],
+    ];
+    for (const [ax, az, bx, bz, nx, nz] of sides) {
+      const a = m.vert(ax, top, az, nx, 0, nz, col), c = m.vert(bx, top, bz, nx, 0, nz, col);
+      const d = m.vert(bx, y1, bz, nx, 0, nz, col), e = m.vert(ax, y1, az, nx, 0, nz, col);
+      m.quad(a, c, d, e, nx, 0, nz);
+    }
+    const q = [m.vert(x0, y1, z0, 0, 1, 0, col), m.vert(x1, y1, z0, 0, 1, 0, col), m.vert(x1, y1, z1, 0, 1, 0, col), m.vert(x0, y1, z1, 0, 1, 0, col)];
+    m.quad(q[0], q[1], q[2], q[3], 0, 1, 0);
+  }
+  span.vEnd = m.pos.length / 3;
+  span.iEnd = m.idx.length;
+  return span;
+}
+
+export type RealTown = {
+  group: THREE.Group;
+  buildingMesh: THREE.Mesh;
+  flatMesh: THREE.Mesh;
+  streets: Street[];
+  drawCalls: number;
+  /** Cheap per-turn change: hides buildings under the cafes, lowers neighbours, keeps ring bands readable. */
+  update: (cafes: CafeSpot[], ringRadii: number[]) => void;
+  stats: () => { buildings: number; triangles: number };
+  dispose: () => void;
+};
+
+export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts: SceneOpts = {}): RealTown {
+  const buildings = sceneBuildings(snapshot, opts);
+  const m = new Mesh();
+  const spans = buildings.map((b) => addBuilding(m, b, palette));
+  const geometry = m.geometry();
+  const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+  const baseY = Float32Array.from(positions.array as Float32Array);
+  const index = geometry.getIndex()!;
+  const allIdx = Uint32Array.from(index.array as Uint32Array);
+  const heights = new Float32Array(buildings.map((b) => b.h));
+
+  const buildingMesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  buildingMesh.frustumCulled = false;
+  const flatGeo = buildFlat(snapshot, palette);
+  const flatMesh = new THREE.Mesh(flatGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  flatMesh.frustumCulled = false;
+  const group = new THREE.Group();
+  group.add(flatMesh, buildingMesh);
+
+  const update = (cafes: CafeSpot[], ringRadii: number[]) => {
+    const { keep, h } = applyCafes(buildings, cafes, { ...opts, ringRadii });
+    const out = index.array as Uint32Array;
+    let n = 0;
+    let moved = false;
+    for (let i = 0; i < buildings.length; i++) {
+      const s = spans[i];
+      const target = h[i];
+      if (Math.abs(target - heights[i]) > 1e-6) {
+        const k = target / s.h0;
+        const shift = s.h0 - target;
+        for (let v = s.v0; v < s.vWall; v++) positions.setY(v, baseY[v * 3 + 1] * k);
+        for (let v = s.vWall; v < s.vEnd; v++) positions.setY(v, baseY[v * 3 + 1] - shift);
+        heights[i] = target;
+        moved = true;
+      }
+      if (!keep[i]) continue;
+      out.set(allIdx.subarray(s.i0, s.iEnd), n);
+      n += s.iEnd - s.i0;
+    }
+    geometry.setDrawRange(0, n);
+    index.needsUpdate = true;
+    if (moved) positions.needsUpdate = true;
+  };
+  update([], []);
+
+  const dispose = () => {
+    geometry.dispose();
+    flatGeo.dispose();
+    (buildingMesh.material as THREE.Material).dispose();
+    (flatMesh.material as THREE.Material).dispose();
+  };
+  return {
+    group,
+    buildingMesh,
+    flatMesh,
+    streets: streetsForLife(snapshot),
+    drawCalls: 2,
+    update,
+    stats: () => ({
+      buildings: buildings.length,
+      triangles: (geometry.drawRange.count + (flatGeo.getIndex()?.count ?? 0)) / 3,
+    }),
+    dispose,
+  };
+}
