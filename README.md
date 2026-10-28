@@ -23,7 +23,7 @@
 
 Built for the Qloo Agentic Hackathon 2026.
 
-<p align="center"><img src="docs/screen-world.png" alt="The app mid-journey: a voxel East Village where each suggested café is a tower whose height is its Qloo affinity, beside the live Qloo request panel" width="830"></p>
+<p align="center"><img src="docs/screen-world.png" alt="The app after Watch it play: a voxel East Village with streets, traffic and brownstones, where each suggested café is a tower whose height is its Qloo affinity, beside the live Qloo request panel" width="830"></p>
 
 **Short on time?** Open the [live demo](https://home-again-gamma.vercel.app) and press **▶ Watch it play**. It runs a whole three-week journey on real Qloo data in under a minute and narrates each request.
 
