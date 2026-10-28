@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildTown, facadeStyle, planTown, seedFromString, type TownPalette } from "./town";
+import { buildTown, facadeStyle, planTown, seedFromString, streetPolylines, type TownPalette } from "./town";
 import { FALLBACK_PALETTE } from "./palette";
 
 describe("seedFromString", () => {
@@ -15,10 +15,9 @@ const CAFES = [
   { x: 6.8, z: -8.9, clear: 4.5, cap: 6 },
   { x: 6.8, z: 17.8, clear: 7.5, cap: 3 },
 ];
-const RINGS = [20, 28, 40];
 
 function plan() {
-  return planTown({ seed: 7, half: 90, cafes: CAFES, ringRadii: RINGS });
+  return planTown({ seed: 7, half: 90, cafes: CAFES });
 }
 
 describe("planTown", () => {
@@ -27,7 +26,7 @@ describe("planTown", () => {
   });
 
   it("differs across seeds", () => {
-    const other = planTown({ seed: 8, half: 90, cafes: CAFES, ringRadii: RINGS });
+    const other = planTown({ seed: 8, half: 90, cafes: CAFES });
     expect(JSON.stringify(other)).not.toBe(JSON.stringify(plan()));
   });
 
@@ -65,20 +64,9 @@ describe("planTown", () => {
     for (const b of brick) expect(Math.hypot(b.x, b.z)).toBeLessThan(38);
   });
 
-  it("keeps ring bands clear of buildings", () => {
-    const { buildings } = plan();
-    for (const b of buildings) {
-      const corners = [
-        [b.x - b.w / 2, b.z - b.d / 2],
-        [b.x + b.w / 2, b.z - b.d / 2],
-        [b.x - b.w / 2, b.z + b.d / 2],
-        [b.x + b.w / 2, b.z + b.d / 2],
-      ];
-      for (const r of RINGS) {
-        const ds = corners.map(([x, z]) => Math.abs(Math.hypot(x, z) - r));
-        expect(Math.min(...ds)).toBeGreaterThan(1.5);
-      }
-    }
+  it("clears no ring bands: week rings are not drawn, so ring radii change nothing", () => {
+    const withRings = { seed: 7, half: 90, cafes: CAFES, ringRadii: [20, 28, 40] } as Parameters<typeof planTown>[0];
+    expect(JSON.stringify(planTown(withRings))).toBe(JSON.stringify(plan()));
   });
 
   it("plants trees and furniture", () => {
@@ -206,5 +194,42 @@ describe("buildTown", () => {
     const { group, drawCalls } = buildTown(plan(), palette);
     expect(drawCalls).toBeLessThanOrEqual(24);
     expect(group.children.length).toBe(drawCalls);
+  });
+});
+
+describe("streetPolylines", () => {
+  it("adds a node where streets cross so a router can turn there", () => {
+    const lines = streetPolylines([
+      { x: -10, z: 0, dir: "x", length: 20, lanes: 1 },
+      { x: 0, z: -10, dir: "z", length: 20, lanes: 2 },
+    ]);
+    expect(lines[0]).toEqual([{ x: -10, z: 0 }, { x: 0, z: 0 }, { x: 10, z: 0 }]);
+    expect(lines[1]).toEqual([{ x: 0, z: -10 }, { x: 0, z: 0 }, { x: 0, z: 10 }]);
+  });
+
+  it("keeps two end points when nothing crosses and does not double a crossing at an end", () => {
+    const lines = streetPolylines([
+      { x: 0, z: 0, dir: "x", length: 10, lanes: 1 },
+      { x: 10, z: -5, dir: "z", length: 10, lanes: 1 },
+      { x: 0, z: 30, dir: "x", length: 10, lanes: 1 },
+    ]);
+    expect(lines[0]).toEqual([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
+    expect(lines[1]).toEqual([{ x: 10, z: -5 }, { x: 10, z: 0 }, { x: 10, z: 5 }]);
+    expect(lines[2]).toEqual([{ x: 0, z: 30 }, { x: 10, z: 30 }]);
+  });
+
+  it("covers every street of the procedural grid, all inside the town", () => {
+    const { streets } = plan();
+    const lines = streetPolylines(streets);
+    expect(lines).toHaveLength(streets.length);
+    for (const line of lines) {
+      expect(line.length).toBeGreaterThanOrEqual(2);
+      for (const p of line) {
+        expect(Math.abs(p.x)).toBeLessThanOrEqual(90);
+        expect(Math.abs(p.z)).toBeLessThanOrEqual(90);
+      }
+    }
+    // avenues cross 11 streets each in the grid: more than the two ends
+    expect(Math.max(...lines.map((l) => l.length))).toBeGreaterThan(8);
   });
 });

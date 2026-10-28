@@ -56,6 +56,7 @@ class Bucket {
 }
 
 import type { Street } from "../../lib/life";
+import type { P } from "../../lib/route";
 
 export type { Street };
 
@@ -69,7 +70,7 @@ export const STREET_LANE_W = 1.6;
 export const roadWidth = (lanes: 1 | 2): number => lanes * STREET_LANE_W + 0.4;
 
 export type TownCafe = { x: number; z: number; clear: number; cap: number };
-export type TownOptions = { seed: number; half?: number; cafes?: TownCafe[]; ringRadii?: number[] };
+export type TownOptions = { seed: number; half?: number; cafes?: TownCafe[] };
 
 export type Block = { x: number; z: number; w: number; d: number };
 export type Building = { x: number; z: number; w: number; d: number; h: number; variant: number; brick: boolean };
@@ -89,6 +90,34 @@ export type TownPlan = {
   crossings: Post[];
   park: Block;
 };
+
+/** Each street as a polyline with a node at every crossing, so a router can turn there (same exact points on both streets). */
+export function streetPolylines(streets: Street[]): P[][] {
+  const EPS = 1e-6;
+  const across = (s: Street, other: Street): P | null => {
+    if (s.dir === other.dir) return null;
+    const x = s.dir === "x" ? other.x : s.x;
+    const z = s.dir === "x" ? s.z : other.z;
+    const inside = (st: Street) =>
+      st.dir === "x"
+        ? x >= st.x - EPS && x <= st.x + st.length + EPS && Math.abs(z - st.z) <= EPS
+        : z >= st.z - EPS && z <= st.z + st.length + EPS && Math.abs(x - st.x) <= EPS;
+    return inside(s) && inside(other) ? { x, z } : null;
+  };
+  return streets.map((s) => {
+    const along = (p: P) => (s.dir === "x" ? p.x : p.z);
+    const start: P = { x: s.x, z: s.z };
+    const end: P = s.dir === "x" ? { x: s.x + s.length, z: s.z } : { x: s.x, z: s.z + s.length };
+    const mids: P[] = [];
+    for (const other of streets) {
+      const p = across(s, other);
+      if (!p || Math.abs(along(p) - along(start)) <= EPS || Math.abs(along(p) - along(end)) <= EPS) continue;
+      if (!mids.some((m) => Math.abs(along(m) - along(p)) <= EPS)) mids.push(p);
+    }
+    mids.sort((a, b) => along(a) - along(b));
+    return [start, ...mids, end];
+  });
+}
 
 export function seedFromString(s: string): number {
   let h = 2166136261;
@@ -127,21 +156,9 @@ const rectClearOfCircles = (
     return Math.hypot(dx, dz) >= c.r;
   });
 
-const rectClearOfRings = (x: number, z: number, w: number, d: number, radii: number[], gap: number): boolean =>
-  radii.every((r) => {
-    const corners: [number, number][] = [
-      [x - w / 2, z - d / 2],
-      [x + w / 2, z - d / 2],
-      [x - w / 2, z + d / 2],
-      [x + w / 2, z + d / 2],
-    ];
-    return corners.every(([cx, cz]) => Math.abs(Math.hypot(cx, cz) - r) > gap);
-  });
-
 export function planTown(opts: TownOptions): TownPlan {
   const half = opts.half ?? 90;
   const cafes = opts.cafes ?? [];
-  const ringRadii = opts.ringRadii ?? [];
   const rng = hashSeed(opts.seed);
 
   const avenueXs = [-72, -48, -24, 0, 24, 48, 72];
@@ -191,7 +208,6 @@ export function planTown(opts: TownOptions): TownPlan {
         const d = b.d * (0.5 + rng() * 0.15);
         const h = 4 + Math.floor(rng() * 3);
         if (!rectClearOfCircles(x, b.z, w, d, cafeCircles)) continue;
-        if (!rectClearOfRings(x, b.z, w, d, ringRadii, 2.2)) continue;
         buildings.push({ x, z: b.z, w, d, h, variant: Math.floor(rng() * 4), brick: true });
       }
       continue;
@@ -209,7 +225,6 @@ export function planTown(opts: TownOptions): TownPlan {
         if (Math.hypot(x - c.x, z - c.z) < 11) h = Math.min(h, c.cap);
       }
       if (!rectClearOfCircles(x, z, w, d, cafeCircles)) continue;
-      if (!rectClearOfRings(x, z, w, d, ringRadii, 2.2)) continue;
       buildings.push({ x, z, w, d, h, variant: Math.floor(rng() * 6), brick: false });
     }
   }

@@ -72,13 +72,66 @@ export function cafeStatus(id: string, state: JourneyState, verdicts: Record<str
 
 export type Fit = { cx: number; cz: number; halfSize: number };
 
-/** Tight frame around the current ring plus the towers, with ~15% margin. */
+/** Camera zoom range: 0.5x for a wide overview up to 8x, where a single street fills the screen. */
+export const ZOOM_MIN = 0.5;
+export const ZOOM_MAX = 8;
+export const clampZoom = (zoom: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom));
+
+/** While the character travels the camera holds about this half-width of street (scene units), at zoom 4-5. */
+const FOLLOW_HALF_UNITS = 4.5;
+export const FOLLOW_ZOOM_MIN = 4;
+export const FOLLOW_ZOOM_MAX = 5;
+export function followZoom(frameHalfWidth: number): number {
+  return Math.min(FOLLOW_ZOOM_MAX, Math.max(FOLLOW_ZOOM_MIN, frameHalfWidth / FOLLOW_HALF_UNITS));
+}
+
+const FIT_MARGIN = 1.1;
+/** A tower's tag floats this far (scene units) above its top; the frame keeps it on screen. */
+export const TAG_LIFT_UNITS = 1.6;
+/** Half the on-screen width of a tower (a 1.8-unit voxel seen corner-on), so a tower at the edge is not cut. */
+export const TOWER_HALF_UNITS = 1.3;
+/** Never frame tighter than 200 m, so a lone nearby cafe does not fill the screen. */
+const FIT_MIN_HALF = 8;
+
+const currentRingUnits = (scene: Scene): number => (scene.rings.find((r) => r.current) ?? scene.rings[0])?.radiusUnits ?? 0;
+
+/** The cafes this week's cards put on the map; saved cafes from earlier weeks are not framed. A tower without the flag counts. */
+const framedTowers = (scene: Scene): Tower[] => scene.towers.filter((t) => t.live !== false);
+
+function squareFit(towers: Tower[], scene: Scene): Fit {
+  if (towers.length === 0) return { cx: 0, cz: 0, halfSize: currentRingUnits(scene) * FIT_MARGIN };
+  let axis = 0;
+  for (const t of towers) axis = Math.max(axis, Math.abs(t.x), Math.abs(t.z));
+  return { cx: 0, cz: 0, halfSize: Math.max(FIT_MIN_HALF, axis * FIT_MARGIN) };
+}
+
+/** Frame around this week's cafes with ~10% margin (the current ring only while none have arrived). */
 export function fitScene(scene: Scene): Fit {
-  const current = scene.rings.find((r) => r.current) ?? scene.rings[0];
-  const ringR = current ? current.radiusUnits : 0;
-  let axis = ringR;
-  for (const t of scene.towers) axis = Math.max(axis, Math.abs(t.x), Math.abs(t.z));
-  return { cx: 0, cz: 0, halfSize: axis * 1.15 };
+  return squareFit(framedTowers(scene), scene);
+}
+
+/** Frame that holds every tower, saved ones included: the static plan cannot be panned. */
+export function fitAllScene(scene: Scene): Fit {
+  return squareFit(scene.towers, scene);
+}
+
+/**
+ * Half-width of the isometric ortho frustum (scene units) that holds this week's cafes, towers' tops
+ * included, plus ~10% on a screen of this width/height. The camera looks down (1,1,1): screen x is
+ * (x - z) / sqrt 2 and screen y is (-x + 2y - z) / sqrt 6, centred on the origin (home).
+ */
+export function isoFit(scene: Scene, aspect: number): number {
+  const towers = framedTowers(scene);
+  if (towers.length === 0) return currentRingUnits(scene) * FIT_MARGIN;
+  const a = Math.max(aspect, 0.2);
+  let half = 0;
+  for (const t of towers) {
+    const sx = Math.abs(t.x - t.z) / Math.SQRT2 + TOWER_HALF_UNITS;
+    const foot = Math.abs(t.x + t.z) / Math.sqrt(6);
+    const top = Math.abs(-t.x - t.z + 2 * (t.height + TAG_LIFT_UNITS)) / Math.sqrt(6);
+    half = Math.max(half, sx, Math.max(foot, top) * a);
+  }
+  return Math.max(FIT_MIN_HALF, half * FIT_MARGIN);
 }
 
 export function compactLabel(name: string, distanceM: number): string {
@@ -96,6 +149,8 @@ export type Tower = {
   status: CafeStatus;
   distanceM: number;
   selected?: boolean;
+  /** True for a cafe this week's cards put on the map, false for a saved one from an earlier week. */
+  live?: boolean;
 };
 
 export type Ring = { radiusUnits: number; week: 1 | 2 | 3; current: boolean };
@@ -133,6 +188,7 @@ export function buildScene(
       role: tasteRole([...c.tasteLink, ...c.unknowns]),
       status,
       distanceM: c.distanceM,
+      live: true,
     };
   });
   for (const saved of state.saved) {
@@ -147,6 +203,7 @@ export function buildScene(
       role: tasteRole(saved.tags),
       status: cafeStatus(saved.id, state, verdicts),
       distanceM: Math.round(haversineM(state.area, { lat: saved.lat, lng: saved.lng })),
+      live: false,
     });
   }
 

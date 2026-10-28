@@ -4,6 +4,8 @@
 import * as THREE from "three";
 import type { GeoSnapshot } from "../../lib/geomap";
 import type { Street } from "../../lib/life";
+import { TRIP_MAX_SEC, TRIP_MIN_SEC, autoMode, planTrip, type P, type StreetGraph, type TravelMode, type Trip } from "../../lib/route";
+import { UNIT_M } from "../../lib/world";
 import type { WorldPalette } from "./palette";
 
 const DM_PER_UNIT = 250;
@@ -64,9 +66,6 @@ export type SceneBuilding = {
   cz: number;
   /** Bounding box [minX, minZ, maxX, maxZ]. */
   bb: [number, number, number, number];
-  /** Distance range from the scene origin, for the ring bands. */
-  dMin: number;
-  dMax: number;
 };
 
 export type CafeSpot = { x: number; z: number; clear: number; cap: number };
@@ -74,10 +73,6 @@ export type CafeSpot = { x: number; z: number; clear: number; cap: number };
 export type SceneOpts = {
   /** Footprint pull-back from the street, units (default 0.15). */
   setback?: number;
-  ringRadii?: number[];
-  /** Half width of the band around a ring that is kept low (default 1.1). */
-  ringGap?: number;
-  ringCap?: number;
   capRadius?: number;
 };
 
@@ -124,14 +119,13 @@ export function sceneBuildings(snapshot: GeoSnapshot, opts: SceneOpts = {}): Sce
         }
       }
     }
-    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, dMax = 0;
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
     for (let i = 0; i < n; i++) {
       const x = outer[i * 2], z = outer[i * 2 + 1];
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x);
       minZ = Math.min(minZ, z);
       maxZ = Math.max(maxZ, z);
-      dMax = Math.max(dMax, Math.hypot(x, z));
     }
     out.push({
       id,
@@ -140,8 +134,6 @@ export function sceneBuildings(snapshot: GeoSnapshot, opts: SceneOpts = {}): Sce
       cx: (minX + maxX) / 2,
       cz: (minZ + maxZ) / 2,
       bb: [minX, minZ, maxX, maxZ],
-      dMin: distToRing(0, 0, outer),
-      dMax,
     });
   });
   return out;
@@ -154,16 +146,10 @@ export function applyCafes(
   opts: SceneOpts = {},
 ): { keep: Uint8Array; h: Float32Array } {
   const capRadius = opts.capRadius ?? CAP_RADIUS;
-  const gap = opts.ringGap ?? 1.1;
-  const ringCap = opts.ringCap ?? 0.9;
-  const rings = opts.ringRadii ?? [];
   const keep = new Uint8Array(buildings.length).fill(1);
   const h = new Float32Array(buildings.length);
   buildings.forEach((b, i) => {
     let height = b.h;
-    for (const r of rings) {
-      if (b.dMax >= r - gap && b.dMin <= r + gap) height = Math.min(height, ringCap);
-    }
     for (const c of cafes) {
       const reach = Math.max(c.clear, capRadius);
       const bx = Math.max(b.bb[0] - c.x, 0, c.x - b.bb[2]);
@@ -269,6 +255,29 @@ export function footprintPath(snapshot: GeoSnapshot): string {
     parts.push(`${d}Z`);
   }
   return parts.join("");
+}
+
+/** Street centrelines as scene-unit polylines: the input for lib/route's buildGraph. */
+export function geoPolylines(snapshot: GeoSnapshot): P[][] {
+  const out: P[][] = [];
+  for (const s of snapshot.streets) {
+    const line: P[] = [];
+    for (let i = 0; i + 1 < s.p.length; i += 2) line.push({ x: s.p[i] / DM_PER_UNIT, z: s.p[i + 1] / DM_PER_UNIT });
+    if (line.length >= 2) out.push(line);
+  }
+  return out;
+}
+
+const STRAIGHT_M_PER_SEC = { walk: 120, taxi: 260, bus: 260 };
+
+/** A trip along the streets; when the graph cannot route it, the straight line, so the character always moves. */
+export function tripFor(graph: StreetGraph, from: P, to: P, mode: TravelMode | "auto" = "auto"): Trip {
+  const planned = planTrip(graph, from, to, mode);
+  if (planned) return planned;
+  const lengthM = Math.hypot(to.x - from.x, to.z - from.z) * UNIT_M;
+  const m = mode === "auto" ? autoMode(lengthM) : mode;
+  const durationSec = Math.min(TRIP_MAX_SEC, Math.max(TRIP_MIN_SEC, lengthM / STRAIGHT_M_PER_SEC[m]));
+  return { mode: m, points: [from, to], lengthM, durationSec };
 }
 
 // ---------------------------------------------------------------- Three
@@ -462,8 +471,8 @@ export type RealTown = {
   /** The central main streets the life layer drives on (short alleys hidden between buildings are left out). */
   streets: Street[];
   drawCalls: number;
-  /** Cheap per-turn change: hides buildings under the cafes, lowers neighbours, keeps ring bands readable. */
-  update: (cafes: CafeSpot[], ringRadii: number[]) => void;
+  /** Cheap per-turn change: hides buildings under the cafes and lowers their neighbours. */
+  update: (cafes: CafeSpot[]) => void;
   stats: () => { buildings: number; triangles: number };
   dispose: () => void;
 };
@@ -490,8 +499,8 @@ export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts
   const group = new THREE.Group();
   group.add(flatMesh, buildingMesh);
 
-  const update = (cafes: CafeSpot[], ringRadii: number[]) => {
-    const { keep, h } = applyCafes(buildings, cafes, { ...opts, ringRadii });
+  const update = (cafes: CafeSpot[]) => {
+    const { keep, h } = applyCafes(buildings, cafes, opts);
     const out = index.array as Uint32Array;
     let n = 0;
     let moved = false;
@@ -514,7 +523,7 @@ export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts
     index.needsUpdate = true;
     if (moved) positions.needsUpdate = true;
   };
-  update([], []);
+  update([]);
 
   const dispose = () => {
     geometry.dispose();

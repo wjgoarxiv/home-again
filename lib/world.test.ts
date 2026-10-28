@@ -2,7 +2,26 @@ import { describe, expect, it } from "vitest";
 import { haversineM } from "./geo";
 import type { Card, JourneyState } from "./schema";
 import { rotateToGrid } from "./geomap";
-import { UNIT_M, buildScene, cafeStatus, compactLabel, fitScene, project, tasteRole, towerHeight } from "./world";
+import {
+  UNIT_M,
+  TAG_LIFT_UNITS,
+  TOWER_HALF_UNITS,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  buildScene,
+  cafeStatus,
+  clampZoom,
+  compactLabel,
+  fitAllScene,
+  fitScene,
+  followZoom,
+  isoFit,
+  project,
+  tasteRole,
+  towerHeight,
+  type Scene,
+  type Tower,
+} from "./world";
 
 const AREA = { name: "East Village, New York", lat: 40.726111111111, lng: -73.981388888889 };
 
@@ -269,23 +288,123 @@ describe("buildScene", () => {
   });
 });
 
+function tower(x: number, z: number, over: Partial<Tower> = {}): Tower {
+  return { id: `t${x}:${z}`, name: "T", x, z, height: 4, role: "other", status: "candidate", distanceM: 100, live: true, ...over };
+}
+
+function sceneOf(towers: Tower[], over: Partial<Scene> = {}): Scene {
+  return {
+    towers,
+    rings: [{ radiusUnits: 28, week: 2, current: true }],
+    home: { label: "Old · Seoul", short: "Seoul", x: -50, z: -50 },
+    beams: [],
+    focusId: null,
+    ...over,
+  };
+}
+
 describe("fitScene", () => {
-  it("frames the current ring with ~15% margin", () => {
+  it("frames the current week's cafes with ~10% margin, not the whole ring", () => {
+    const scene = sceneOf([tower(10, -12), tower(-9, 14)]);
+    expect(fitScene(scene)).toEqual({ cx: 0, cz: 0, halfSize: 14 * 1.1 });
+  });
+
+  it("ignores saved cafes from earlier weeks", () => {
+    const scene = sceneOf([tower(10, -12), tower(-40, 5, { live: false })]);
+    expect(fitScene(scene).halfSize).toBeCloseTo(12 * 1.1, 6);
+  });
+
+  it("never frames tighter than 200 m", () => {
+    expect(fitScene(sceneOf([tower(1, 2)])).halfSize).toBe(8);
+  });
+
+  it("falls back to the current ring when no cafe has arrived yet", () => {
     const scene = buildScene(state({ week: 2 }), [], {});
-    expect(fitScene(scene)).toEqual({ cx: 0, cz: 0, halfSize: 28 * 1.15 });
+    expect(fitScene(scene).halfSize).toBeCloseTo(28 * 1.1, 6);
   });
 
-  it("expands to include towers beyond the current ring", () => {
-    const far = card({ entityId: "far", lat: AREA.lat + 0.02, lng: AREA.lng });
-    const scene = buildScene(state({ week: 3 }), [far], {});
-    const tower = scene.towers.find((t) => t.id === "far")!;
-    const extent = Math.max(Math.abs(tower.x), Math.abs(tower.z), 20);
-    expect(fitScene(scene).halfSize).toBeCloseTo(extent * 1.15, 6);
-  });
-
-  it("uses the widen ring when it is current", () => {
+  it("uses the widen ring when it is current and nothing is shown", () => {
     const scene = buildScene(state({ week: 1 }), [], {}, 1500);
-    expect(fitScene(scene).halfSize).toBeCloseTo(60 * 1.15, 6);
+    expect(fitScene(scene).halfSize).toBeCloseTo(60 * 1.1, 6);
+  });
+
+  it("treats towers without the live flag as current", () => {
+    const { live: _live, ...bare } = tower(15, 3);
+    expect(fitScene(sceneOf([bare as Tower])).halfSize).toBeCloseTo(15 * 1.1, 6);
+  });
+});
+
+describe("fitAllScene", () => {
+  it("includes saved cafes too, for the static plan", () => {
+    const scene = sceneOf([tower(10, -12), tower(-40, 5, { live: false })]);
+    expect(fitAllScene(scene).halfSize).toBeCloseTo(40 * 1.1, 6);
+  });
+});
+
+describe("isoFit", () => {
+  it("is the ortho half-width that holds the cafes' isometric screen extent plus 10%", () => {
+    // (10, -10): screen x = 20 / sqrt(2) plus the tower's own half width; the top stays well inside.
+    const scene = sceneOf([tower(10, -10, { height: 7 })]);
+    expect(isoFit(scene, 1.5)).toBeCloseTo((20 / Math.SQRT2 + TOWER_HALF_UNITS) * 1.1, 6);
+  });
+
+  it("widens for tall screens' vertical extent: a far south-east cafe on a wide screen", () => {
+    // (10, 10): screen x = 0, screen y = -20 / sqrt(6); half-height = half-width / aspect.
+    const scene = sceneOf([tower(10, 10, { height: 2 })]);
+    expect(isoFit(scene, 2)).toBeCloseTo((20 / Math.sqrt(6)) * 1.1 * 2, 6);
+    expect(isoFit(scene, 0.5)).toBe(8);
+  });
+
+  it("counts a tower's top, not only its foot", () => {
+    const low = isoFit(sceneOf([tower(-10, -10, { height: 1 })]), 2);
+    const high = isoFit(sceneOf([tower(-10, -10, { height: 12 })]), 2);
+    expect(high).toBeGreaterThan(low);
+  });
+
+  it("leaves room above a tower's top for its tag", () => {
+    const scene = sceneOf([tower(-10, -10, { height: 12 })]);
+    expect(isoFit(scene, 2)).toBeCloseTo(((20 + 2 * (12 + TAG_LIFT_UNITS)) / Math.sqrt(6)) * 1.1 * 2, 6);
+  });
+
+  it("is closer than the old whole-ring framing for the demo cafes", () => {
+    const cards = [
+      card({ entityId: "a", lat: AREA.lat + 0.002, lng: AREA.lng + 0.003 }),
+      card({ entityId: "b", lat: AREA.lat - 0.004, lng: AREA.lng + 0.002 }),
+    ];
+    const scene = buildScene(state({ week: 2 }), cards, {});
+    expect(isoFit(scene, 1.8)).toBeLessThan(28 * 1.15);
+  });
+
+  it("falls back to the current ring with no cafes and ignores saved ones", () => {
+    expect(isoFit(sceneOf([]), 1.5)).toBeCloseTo(28 * 1.1, 6);
+    expect(isoFit(sceneOf([tower(30, 30, { live: false })]), 1.5)).toBeCloseTo(28 * 1.1, 6);
+  });
+});
+
+describe("zoom range", () => {
+  it("reaches street level (8x) and a wide overview (0.5x)", () => {
+    expect(ZOOM_MIN).toBe(0.5);
+    expect(ZOOM_MAX).toBe(8);
+    expect(clampZoom(0.1)).toBe(0.5);
+    expect(clampZoom(3)).toBe(3);
+    expect(clampZoom(20)).toBe(8);
+  });
+
+  it("follows at zoom 4 to 5, tighter on wider frames", () => {
+    expect(followZoom(2)).toBe(4);
+    expect(followZoom(100)).toBe(5);
+    expect(followZoom(20)).toBeCloseTo(20 / 4.5, 6);
+    expect(followZoom(20)).toBeGreaterThanOrEqual(4);
+    expect(followZoom(20)).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("live towers", () => {
+  it("marks card towers live and saved-only towers not live", () => {
+    const saved = [{ id: "s1", name: "Saved", lat: AREA.lat + 0.001, lng: AREA.lng, affinity: 0.5, tags: [] }];
+    const scene = buildScene(state({ saved }), [card({ entityId: "c1" })], {});
+    expect(scene.towers.find((t) => t.id === "c1")?.live).toBe(true);
+    expect(scene.towers.find((t) => t.id === "s1")?.live).toBe(false);
   });
 });
 

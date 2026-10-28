@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GeoSnapshot } from "../../lib/geomap";
+import { UNIT_M } from "../../lib/world";
 import { FALLBACK_PALETTE } from "./palette";
 import {
   buildRealTown,
   buildingsForScene,
+  geoPolylines,
   heightUnits,
   loadGeo,
   sceneBuildings,
   slugOf,
   streetsForLife,
+  tripFor,
 } from "./realTown";
+import { buildGraph } from "../../lib/route";
 
 const DM = 250; // decimetres per scene unit
 
@@ -101,10 +105,10 @@ describe("buildingsForScene", () => {
     expect(kept.find((b) => b.id === 1)!.h).toBeLessThanOrEqual(1);
   });
 
-  it("keeps a ring band readable by lowering buildings that straddle it", () => {
-    const kept = buildingsForScene(s, [], { ...opts, ringRadii: [6], ringCap: 0.9 });
-    expect(kept.find((b) => b.id === 1)!.h).toBeLessThanOrEqual(0.9);
-    expect(kept.find((b) => b.id === 2)!.h).toBeCloseTo(heightUnits(400), 6);
+  it("draws no ring bands: buildings on a former ring radius keep their height", () => {
+    const withRings = { ...opts, ringRadii: [6], ringCap: 0.9 } as typeof opts;
+    const kept = buildingsForScene(s, [], withRings);
+    expect(kept.find((b) => b.id === 1)!.h).toBeCloseTo(heightUnits(400), 6);
   });
 
   it("with no cafes returns everything at its exaggerated height", () => {
@@ -156,6 +160,49 @@ describe("streetsForLife", () => {
     expect(streets.every((st) => st.dir === "x")).toBe(true);
     expect(streets.find((st) => st.z === 0)!.lanes).toBe(2);
     expect(streets.find((st) => st.z === 8)!.lanes).toBe(1);
+  });
+});
+
+describe("geoPolylines", () => {
+  it("turns street centrelines into scene-unit polylines", () => {
+    const s = snap([], [line(2, 0, 0, 10, 0, 10, 20), line(1, -5, -5, 5, -5)]);
+    expect(geoPolylines(s)).toEqual([
+      [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 10, z: 20 }],
+      [{ x: -5, z: -5 }, { x: 5, z: -5 }],
+    ]);
+  });
+
+  it("skips degenerate streets with fewer than two points", () => {
+    const s = snap([], [{ l: 1, p: [250, 250] }, line(1, 0, 0, 3, 0)]);
+    expect(geoPolylines(s)).toHaveLength(1);
+  });
+});
+
+describe("tripFor", () => {
+  const empty = buildGraph([]);
+  const near = { x: 6, z: 0 }; // 150 m
+  const far = { x: 40, z: 0 }; // 1000 m
+
+  it("always returns a trip from the start to the cafe, straight when the graph cannot route", () => {
+    const t = tripFor(empty, { x: 0, z: 0 }, near, "auto");
+    expect(t.points[0]).toEqual({ x: 0, z: 0 });
+    expect(t.points[t.points.length - 1]).toEqual(near);
+    expect(t.lengthM).toBeGreaterThanOrEqual(near.x * UNIT_M - 1e-6);
+  });
+
+  it("picks walk up to 500 m and taxi beyond when the mode is auto", () => {
+    expect(tripFor(empty, { x: 0, z: 0 }, near, "auto").mode).toBe("walk");
+    expect(tripFor(empty, { x: 0, z: 0 }, far, "auto").mode).toBe("taxi");
+  });
+
+  it("honours an explicit mode and keeps the duration in the 3-8 s window", () => {
+    const bus = tripFor(empty, { x: 0, z: 0 }, near, "bus");
+    expect(bus.mode).toBe("bus");
+    for (const to of [near, far, { x: 1, z: 0 }, { x: 400, z: 0 }]) {
+      const t = tripFor(empty, { x: 0, z: 0 }, to, "walk");
+      expect(t.durationSec).toBeGreaterThanOrEqual(3);
+      expect(t.durationSec).toBeLessThanOrEqual(8);
+    }
   });
 });
 
@@ -213,10 +260,10 @@ describe("buildRealTown", () => {
     const t = buildRealTown(s, FALLBACK_PALETTE, { setback: 0 });
     const geometry = t.buildingMesh.geometry;
     const full = geometry.drawRange.count;
-    t.update([{ x: 0, z: 0, clear: 4.5, cap: 1 }], []);
+    t.update([{ x: 0, z: 0, clear: 4.5, cap: 1 }]);
     expect(t.buildingMesh.geometry).toBe(geometry);
     expect(geometry.drawRange.count).toBeLessThan(full);
-    t.update([], []);
+    t.update([]);
     expect(geometry.drawRange.count).toBe(full);
   });
 
@@ -231,9 +278,9 @@ describe("buildRealTown", () => {
       return m;
     };
     const before = top();
-    t.update([{ x: -10, z: -10, clear: 0.5, cap: 0.8 }, { x: 0, z: 0, clear: 0.5, cap: 0.8 }, { x: 10, z: 0, clear: 0.5, cap: 0.8 }, { x: 0, z: 10, clear: 0.5, cap: 0.8 }], []);
+    t.update([{ x: -10, z: -10, clear: 0.5, cap: 0.8 }, { x: 0, z: 0, clear: 0.5, cap: 0.8 }, { x: 10, z: 0, clear: 0.5, cap: 0.8 }, { x: 0, z: 10, clear: 0.5, cap: 0.8 }]);
     expect(top()).toBeLessThan(before - 0.5);
-    t.update([], []);
+    t.update([]);
     expect(top()).toBeCloseTo(before, 6);
   });
 
