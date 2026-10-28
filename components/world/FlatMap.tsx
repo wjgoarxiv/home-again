@@ -114,8 +114,10 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
         />
         {scene.towers.map((tower) => {
           const sq = tower.status === "rejected" ? H / 30 : H / 45 + tower.height * (H / 110);
-          const dimmed = tower.status === "seen";
+          const finale = scene.focusId;
+          const dimmed = tower.status === "seen" || (finale !== null && tower.id !== finale);
           const selected = tower.id === selectedId;
+          const regular = tower.id === finale;
           return (
             <g key={tower.id} opacity={dimmed ? 0.45 : 1}>
               <rect
@@ -124,8 +126,8 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
                 width={sq}
                 height={sq}
                 fill={roleFill(tower)}
-                stroke={selected ? "var(--c-ink)" : "none"}
-                strokeWidth={selected ? H / 40 : 0}
+                stroke={selected ? "var(--c-ink)" : regular ? "var(--c-accent)" : "none"}
+                strokeWidth={selected || regular ? H / 40 : 0}
               />
               {tower.status === "revisit" && (
                 <rect
@@ -149,12 +151,12 @@ export default function FlatMap({ scene, selectedId, onSelect }: FlatMapProps) {
             color: "var(--c-canvas)",
           }}
         >
-          {scene.home.label}
+          {homeDocked ? scene.home.short : scene.home.label}
         </div>
       )}
       {side > 0 &&
         scene.towers.map((tower, i) => {
-          const open = tower.id === selectedId || tower.id === hoverId;
+          const open = tower.id === selectedId || tower.id === hoverId || tower.id === scene.focusId;
           const left = clampX(pxx(tower.x));
           const top = clampY(pxy(tower.z));
           const hover = {

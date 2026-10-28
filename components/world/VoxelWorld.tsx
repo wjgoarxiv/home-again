@@ -183,6 +183,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     right?: number;
     bottom?: number;
     transform?: string;
+    docked?: boolean;
   }>({ left: 0, top: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
   const threeRef = useRef<{
@@ -204,6 +205,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
     pinchDist: number | null;
     fitHalf: number;
     fitKey: string;
+    lastFocus: string | null;
     applyFit: () => void;
     renderNow: () => void;
   } | null>(null);
@@ -254,6 +256,7 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       pinchDist: null as number | null,
       fitHalf: 46,
       fitKey: "",
+      lastFocus: null,
       applyFit: () => {},
       renderNow: () => {},
     };
@@ -312,11 +315,13 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
           ? {
               ...(hx <= w / 2 ? { left: 8 } : { right: 8 }),
               ...(hy <= h / 2 ? { top: 8 } : { bottom: 8 }),
+              docked: true,
             }
           : {
               left: clamp(hx, 110, w - 110),
               top: clamp(hy, 40, h - 20),
               transform: "translate(-50%, -130%)",
+              docked: false,
             },
       );
     };
@@ -425,6 +430,29 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       st.camera.zoom = 1;
       st.target.set(0, 0, 0);
       st.applyFit();
+    }
+
+    const focusId = scene.focusId ?? null;
+    const focusTower = focusId ? scene.towers.find((t) => t.id === focusId) ?? null : null;
+    if (focusId !== st.lastFocus) {
+      st.lastFocus = focusId;
+      if (focusTower) {
+        const dest = new THREE.Vector3(focusTower.x, 0, focusTower.z);
+        if (st.reduced) {
+          st.target.copy(dest);
+          renderNow();
+        } else {
+          const from = st.target.clone();
+          let fstep = 0;
+          const ftick = () => {
+            fstep++;
+            st.target.lerpVectors(from, dest, fstep / 3);
+            renderNow();
+            if (fstep < 3) st.stepTimers.push(window.setTimeout(ftick, 100));
+          };
+          ftick();
+        }
+      }
     }
 
     if (st.content) {
@@ -542,6 +570,25 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       content.add(mesh);
     }
 
+    if (focusTower) {
+      const segs = 10;
+      const mesh = boxMesh(segs, palette.accent);
+      mesh.userData.layer = "finale";
+      const base = heightAt(focusTower.x, focusTower.z);
+      for (let s = 0; s < segs; s++) {
+        const a = (s / segs) * Math.PI * 2;
+        place(
+          mesh, s,
+          focusTower.x + Math.cos(a) * VOX * 1.6, base + 0.28, focusTower.z + Math.sin(a) * VOX * 1.6,
+          0.55, 0.55, 0.55,
+          palette.accent,
+        );
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      content.add(mesh);
+    }
+
     const currentRing = scene.rings.find((r) => r.current) ?? scene.rings[0];
     for (const ring of scene.rings) {
       const count = Math.max(24, Math.floor((2 * Math.PI * ring.radiusUnits) / 2.2));
@@ -610,15 +657,19 @@ export default function VoxelWorld({ scene, selectedId, onSelect, loading, onRea
       <div
         className="ui-meta pointer-events-none absolute z-10 px-2 py-1"
         style={{
-          ...homeLabel,
+          left: homeLabel.left,
+          top: homeLabel.top,
+          right: homeLabel.right,
+          bottom: homeLabel.bottom,
+          transform: homeLabel.transform,
           background: "var(--c-ink)",
           color: "var(--c-canvas)",
         }}
       >
-        {scene.home.label}
+        {homeLabel.docked ? scene.home.short : scene.home.label}
       </div>
       {labels.map((label) => {
-        const open = label.id === selectedId || label.id === hoverId;
+        const open = label.id === selectedId || label.id === hoverId || label.id === scene.focusId;
         if (!open) {
           return (
             <button

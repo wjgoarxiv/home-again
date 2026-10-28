@@ -95,9 +95,9 @@ export type Tower = {
 };
 
 export type Ring = { radiusUnits: number; week: 1 | 2 | 3; current: boolean };
-export type Home = { label: string; x: number; z: number };
+export type Home = { label: string; short: string; x: number; z: number };
 export type Beam = { fromHome: true; toId: string };
-export type Scene = { towers: Tower[]; rings: Ring[]; home: Home; beams: Beam[] };
+export type Scene = { towers: Tower[]; rings: Ring[]; home: Home; beams: Beam[]; focusId: string | null };
 
 const WEEK_RINGS: { radiusUnits: number; week: 1 | 2 | 3 }[] = [
   { radiusUnits: 1000 / UNIT_M, week: 1 },
@@ -152,6 +152,7 @@ export function buildScene(
   const off = HOME_DIST_UNITS / Math.SQRT2;
   const home: Home = {
     label: `${state.seed.name} · ${state.seed.city ?? "old city"}`,
+    short: state.seed.city ?? "old city",
     x: -off,
     z: -off,
   };
@@ -160,5 +161,7 @@ export function buildScene(
     .filter((t) => t.status === "loved" || t.status === "revisit")
     .map((t) => ({ fromHome: true as const, toId: t.id }));
 
-  return { towers, rings, home, beams };
+  const focusId = state.done && state.regular ? state.regular : null;
+
+  return { towers, rings, home, beams, focusId };
 }
