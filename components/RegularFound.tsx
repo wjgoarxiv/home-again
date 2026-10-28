@@ -1,9 +1,19 @@
 import type { Card } from "@/lib/schema";
 import { formatDistance } from "./CafeCard";
 
-export function RegularFound({ card, seedName, onRestart }: { card: Card | null; seedName: string; onRestart: () => void }) {
+export function RegularFound({
+  card,
+  seedName,
+  onReplay,
+  onPickAnother,
+}: {
+  card: Card | null;
+  seedName: string;
+  onReplay: () => void;
+  onPickAnother: () => void;
+}) {
   return (
-    <section className="ui-panel" aria-live="polite">
+    <section className="ui-panel" aria-live="polite" data-tour="result">
       <header className="ui-panel__head">
         <span className="ui-label">{card ? "your new regular" : "three weeks done"}</span>
         <span className="ui-coord">result</span>
@@ -29,9 +39,15 @@ export function RegularFound({ card, seedName, onRestart }: { card: Card | null;
           <p className="ui-small ui-muted">A café becomes your regular once you love it twice. Start again to look further.</p>
         </div>
       )}
-      <button type="button" onClick={onRestart} className="ui-btn mt-6">
-        Start over
-      </button>
+      <div className="ui-cluster mt-6">
+        <button type="button" onClick={onReplay} className="ui-btn ui-btn--primary">
+          Replay with this café
+        </button>
+        <button type="button" onClick={onPickAnother} className="ui-btn">
+          Pick another café
+        </button>
+      </div>
+      <p className="ui-meta mt-3">Replay starts a fresh three weeks from {seedName} in the same neighbourhood. Pick another goes back to the start.</p>
     </section>
   );
 }

@@ -21,7 +21,7 @@ const REASON: Record<Trace["exclude"][number]["reason"], string> = {
 /** The live Qloo request instrument: what this week asked Qloo, named, and how strongly each card matched. */
 export function QlooPanel({ trace, cards, areaName, week, loading }: { trace: Trace | null; cards: Card[]; areaName: string; week: number; loading: boolean }) {
   return (
-    <section className="ui-panel" data-ui-moment="chart" aria-label="Qloo request" aria-busy={loading}>
+    <section className="ui-panel" data-ui-moment="chart" data-tour="qloo" aria-label="Qloo request" aria-busy={loading}>
       <header className="ui-panel__head">
         <span className="ui-label">Qloo · insights request</span>
         <span className="ui-coord">wk {week} · {trace ? `${trace.ms} ms` : "—"}</span>

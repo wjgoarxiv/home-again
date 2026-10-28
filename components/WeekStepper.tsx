@@ -7,7 +7,7 @@ const WEEKS = [
 /** Three ruled cells; the current week's cell is the inverse bar, and its radius shows the widened value when used. */
 export function WeekStepper({ week, wide }: { week: 1 | 2 | 3; wide?: boolean }) {
   return (
-    <ol className="grid grid-cols-3 border-2 border-line-strong" aria-label="Weeks">
+    <ol className="grid grid-cols-3 border-2 border-line-strong" aria-label="Weeks" data-tour="weeks">
       {WEEKS.map((w) => {
         const now = w.week === week;
         return (
