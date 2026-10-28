@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { haversineM } from "./geo";
 import type { Card, JourneyState } from "./schema";
-import { buildScene, cafeStatus, compactLabel, fitScene, project, tasteRole, towerHeight } from "./world";
+import { rotateToGrid } from "./geomap";
+import { UNIT_M, buildScene, cafeStatus, compactLabel, fitScene, project, tasteRole, towerHeight } from "./world";
 
 const AREA = { name: "East Village, New York", lat: 40.726111111111, lng: -73.981388888889 };
 
@@ -297,5 +298,42 @@ describe("compactLabel", () => {
     const label = compactLabel("Fritz Coffee Company Dohwa", 610);
     expect(label).toBe("Fritz Coffee Compa… · 610M");
     expect(label.replace(" · 610M", "").length).toBeLessThanOrEqual(20);
+  });
+});
+
+describe("theta (street-grid rotation)", () => {
+  const p = { lat: AREA.lat + 0.004, lng: AREA.lng + 0.003 };
+
+  it("keeps the old behaviour when theta is 0 or omitted", () => {
+    expect(project(AREA, p, 0)).toEqual(project(AREA, p));
+  });
+
+  it("rotates the projected point exactly like the baked geo data", () => {
+    const flat = project(AREA, p);
+    const want = rotateToGrid(flat.x * UNIT_M, flat.z * UNIT_M, 29.04);
+    const got = project(AREA, p, 29.04);
+    expect(got.x).toBeCloseTo(want.x / UNIT_M, 9);
+    expect(got.z).toBeCloseTo(want.z / UNIT_M, 9);
+  });
+
+  it("preserves the distance from the area centre", () => {
+    const a = project(AREA, p);
+    const b = project(AREA, p, -11.11);
+    expect(Math.hypot(b.x, b.z)).toBeCloseTo(Math.hypot(a.x, a.z), 9);
+  });
+
+  it("buildScene rotates every tower, saved cafe and leaves home and rings alone", () => {
+    const saved = { id: "s1", name: "Saved", lat: AREA.lat - 0.002, lng: AREA.lng - 0.001, affinity: 0.5, tags: [] };
+    const s = state({ saved: [saved] });
+    const plain = buildScene(s, [card()], {});
+    const turned = buildScene(s, [card()], {}, undefined, 25.88);
+    expect(turned.towers).toHaveLength(2);
+    for (let i = 0; i < 2; i++) {
+      const want = rotateToGrid(plain.towers[i].x * UNIT_M, plain.towers[i].z * UNIT_M, 25.88);
+      expect(turned.towers[i].x).toBeCloseTo(want.x / UNIT_M, 9);
+      expect(turned.towers[i].z).toBeCloseTo(want.z / UNIT_M, 9);
+    }
+    expect(turned.home).toEqual(plain.home);
+    expect(turned.rings).toEqual(plain.rings);
   });
 });
