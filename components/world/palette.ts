@@ -31,7 +31,7 @@ export type WorldPalette = {
 };
 
 export const FALLBACK_PALETTE: WorldPalette = {
-  sky: "#fbf7ef",
+  sky: "#d6ebfa",
   ground: "#f1ece1",
   sidewalk: "#e6e0d3",
   road: "#a3abb5",
@@ -47,7 +47,7 @@ export const FALLBACK_PALETTE: WorldPalette = {
   awning: ["#f08a8a", "#7fb7e6", "#8fd0a5", "#f2b66d"],
   signalRed: "#e5534b",
   signalGreen: "#3fae6b",
-  cars: ["#5b8def", "#f2a65a", "#6cc4a1", "#e8708f", "#9b87d8", "#f1cf55"],
+  cars: ["#4fb8a8", "#9b87d8", "#efd24f", "#6ec5ee", "#5f6b86", "#d98fc0"],
   wheel: "#3b4048",
   headlight: "#fffbe8",
   taillight: "#e5484d",
