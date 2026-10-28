@@ -1,16 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Geist } from "next/font/google";
+import "../ui/tokens.css";
+import "../ui/components.css";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Home, again",
@@ -18,10 +9,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fbfaf7" },
-    { media: "(prefers-color-scheme: dark)", color: "#121715" },
-  ],
+  themeColor: "#0d0f0e",
 };
 
 export default function RootLayout({
@@ -30,8 +18,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${fraunces.variable} antialiased`}>{children}</body>
+    <html lang="en" data-theme="dark">
+      <body>{children}</body>
     </html>
   );
 }

@@ -1,0 +1,138 @@
+{
+  "schema_id": "litfamily.design-lock/v1",
+  "style": "computational-brutalism",
+  "family": "workspace",
+  "density": "rich",
+  "fonts": [
+    "JetBrains Mono",
+    "Pretendard"
+  ],
+  "type": {
+    "scale_px": [
+      12,
+      13,
+      14,
+      16,
+      18,
+      20,
+      24,
+      30,
+      38,
+      48
+    ],
+    "display_px": {
+      "min": 40,
+      "max": 88
+    },
+    "moment_px": {
+      "max": 168
+    }
+  },
+  "radius_px": [
+    0
+  ],
+  "space_px": [
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    80,
+    96,
+    128
+  ],
+  "colors": {
+    "light": {
+      "canvas": "#e6e7e3",
+      "surface": "#f4f4f1",
+      "sunken": "#dadbd6",
+      "ink": "#0d0e0d",
+      "ink-2": "#2f322f",
+      "ink-3": "#4d514d",
+      "line": "#c3c5bf",
+      "line-strong": "#3a3d3a",
+      "control": "#666a66",
+      "accent": "#c8370c",
+      "accent-hover": "#a92d09",
+      "on-accent": "#ffffff",
+      "accent-wash": "#f3dccf",
+      "accent-ink": "#a12b07",
+      "accent-2": "#1559b8",
+      "accent-2-ink": "#134e9e",
+      "accent-2-wash": "#dbe6f5",
+      "on-accent-2": "#ffffff",
+      "support": "#cfe6c7",
+      "support-ink": "#1d4a17",
+      "focus": "#c8370c",
+      "positive": "#1d6b2c",
+      "positive-wash": "#d4ead4",
+      "warning": "#734e00",
+      "warning-wash": "#f1e3c0",
+      "negative": "#b0131a",
+      "negative-wash": "#f4d6d4",
+      "info": "#1f4f8a",
+      "info-wash": "#d7e2ef",
+      "chart-1": "#0d0e0d",
+      "chart-2": "#c8370c",
+      "chart-3": "#666a66",
+      "chart-4": "#b4b7b0",
+      "chart-5": "#2f8a3a"
+    },
+    "dark": {
+      "canvas": "#0b0d0b",
+      "surface": "#111411",
+      "sunken": "#070807",
+      "ink": "#c8f5c0",
+      "ink-2": "#a2d39b",
+      "ink-3": "#7eab78",
+      "line": "#1f2a1f",
+      "line-strong": "#44633f",
+      "control": "#557a50",
+      "accent": "#ffb000",
+      "accent-hover": "#ffc233",
+      "on-accent": "#120c00",
+      "accent-wash": "#2a1f05",
+      "accent-ink": "#ffbf3d",
+      "accent-2": "#5aa8ff",
+      "accent-2-ink": "#7dbbff",
+      "accent-2-wash": "#10243a",
+      "on-accent-2": "#06121f",
+      "support": "#173016",
+      "support-ink": "#b6f0ab",
+      "focus": "#ffb000",
+      "positive": "#6fe07a",
+      "positive-wash": "#0f2a12",
+      "warning": "#ffcf5a",
+      "warning-wash": "#2c2307",
+      "negative": "#ff7b6b",
+      "negative-wash": "#331410",
+      "info": "#7cc4ff",
+      "info-wash": "#0e2233",
+      "chart-1": "#c8f5c0",
+      "chart-2": "#ffb000",
+      "chart-3": "#5f8f5a",
+      "chart-4": "#2f452d",
+      "chart-5": "#ff7b6b"
+    }
+  },
+  "elevation": "flat",
+  "files": {
+    "tokens": "ui/tokens.css",
+    "components": "ui/components.css",
+    "script": "ui/ui.js"
+  },
+  "accent_art": "instrument",
+  "moment": {
+    "scale": "small",
+    "kind": "chart",
+    "note": "live Qloo request instrument beside a voxel neighbourhood",
+    "place": null,
+    "selector": "[data-ui-moment]",
+    "above_fold": false
+  }
+}
