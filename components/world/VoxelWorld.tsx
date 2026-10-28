@@ -327,6 +327,8 @@ export default function VoxelWorld({
   const modeRef = useRef(travelMode);
   modeRef.current = travelMode;
   const [labels, setLabels] = useState<Label[]>([]);
+  const [you, setYou] = useState<{ left: number; top: number; away: boolean }>({ left: 0, top: 0, away: false });
+  const [house, setHouse] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const [homeLabel, setHomeLabel] = useState<{
     left?: number;
     top?: number;
@@ -487,12 +489,23 @@ export default function VoxelWorld({
       const hx = (v.x * 0.5 + 0.5) * w;
       const hy = (-v.y * 0.5 + 0.5) * h;
       const docked = hx < 0 || hx > w || hy < 0 || hy > h;
+      // The traveller's own dot ("where am I") is projected the same way as the tags.
+      v.set(st.pos.x, 1.4, st.pos.z).project(camera);
+      const yx = clamp((v.x * 0.5 + 0.5) * w, 24, w - 24);
+      const yy = clamp((-v.y * 0.5 + 0.5) * h, 24 + inset, h - 24);
+      // The little house is "your place"; the "You" dot only appears once you have left its doorstep.
+      const away = Math.hypot(st.pos.x, st.pos.z) > 4;
+      v.set(0, 3.2, 0).project(camera);
+      const ox = clamp((v.x * 0.5 + 0.5) * w, 56, w - 56);
+      const oy = clamp((-v.y * 0.5 + 0.5) * h, 24 + inset, h - 24);
       const key =
         next.map((l) => `${l.id}:${Math.round(l.left)}:${Math.round(l.top)}:${l.hide ? 1 : 0}`).join("|") +
-        `#${Math.round(hx)}:${Math.round(hy)}:${inset}`;
+        `#${Math.round(hx)}:${Math.round(hy)}:${inset}:${Math.round(yx)}:${Math.round(yy)}:${away ? 1 : 0}:${Math.round(ox)}:${Math.round(oy)}`;
       if (key === st.labelKey) return;
       st.labelKey = key;
       setLabels(next);
+      setYou({ left: yx, top: yy, away });
+      setHouse({ left: ox, top: oy });
       setHomeLabel(
         docked
           ? {
@@ -1125,8 +1138,66 @@ export default function VoxelWorld({
           color: "var(--c-canvas)",
         }}
       >
-        {homeLabel.docked ? scene.home.short : scene.home.label}
+        <span aria-hidden="true">◆ </span>
+        {homeLabel.docked ? (
+          `Old regular · ${scene.home.short}`
+        ) : (
+          <>
+            <span className="max-sm:hidden">Your old regular · {scene.home.label}</span>
+            <span className="sm:hidden">Old regular · {scene.home.short}</span>
+          </>
+        )}
       </div>
+      <div
+        aria-hidden="true"
+        className="ui-meta pointer-events-none absolute z-10"
+        style={{
+          left: house.left,
+          top: house.top,
+          transform: "translate(-50%, -100%)",
+          background: "var(--c-surface)",
+          color: "var(--w-home)",
+          border: "2px solid var(--w-home)",
+          padding: "0 6px",
+        }}
+      >
+        ⌂ Your place
+      </div>
+      {you.away && (
+        <div
+          aria-hidden="true"
+          className="ui-meta pointer-events-none absolute z-10 flex items-center"
+          style={{ left: you.left, top: you.top, transform: "translate(-50%, -150%)", gap: 4 }}
+        >
+          <span
+            style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--w-avatar)", border: "2px solid var(--c-ink)" }}
+          />
+          <span style={{ background: "var(--c-surface)", border: "2px solid var(--c-line-strong)", padding: "0 6px" }}>You</span>
+        </div>
+      )}
+      <p
+        className="ui-meta pointer-events-none absolute z-10 hidden flex-wrap items-center sm:flex"
+        aria-label="Map key: numbered tags are cafés and taller towers are better taste matches; the blue house is your place; the orange dot is you; the black label marks your old regular café, far away."
+        style={{
+          right: 8,
+          bottom: "calc(var(--stage-inset-bottom, 0px) + 8px)",
+          maxWidth: "min(520px, calc(100% - 252px))",
+          gap: "2px 12px",
+          background: "var(--c-surface)",
+          color: "var(--c-ink)",
+          border: "2px solid var(--c-line-strong)",
+          padding: "4px 8px",
+        }}
+      >
+        <span aria-hidden="true">
+          <b style={{ border: "2px solid var(--c-line-strong)", padding: "0 4px" }}>1</b> café · taller = better match
+        </span>
+        <span aria-hidden="true" style={{ color: "var(--w-home)" }}>⌂ your place</span>
+        <span aria-hidden="true">
+          <i style={{ display: "inline-block", width: 9, height: 9, borderRadius: "50%", background: "var(--w-avatar)", border: "2px solid var(--c-ink)" }} /> you
+        </span>
+        <span aria-hidden="true">◆ old regular</span>
+      </p>
       {labels.map((label) => {
         const open = label.id === selectedId || label.id === hoverId || label.id === focusId;
         // While the camera follows the character, tags of towers out of view stay out of the way.
