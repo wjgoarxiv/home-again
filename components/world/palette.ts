@@ -28,6 +28,16 @@ export type WorldPalette = {
   people: string[];
   steam: string;
   bird: string;
+  /** Taxi body (the traveller's ride) and city bus body. */
+  taxi: string;
+  bus: string;
+  /** Blocky people: skin, shirt and pants tones. */
+  skin: string[];
+  shirts: string[];
+  pants: string[];
+  /** The user's own character and their home marker. */
+  avatar: string;
+  home: string;
 };
 
 export const FALLBACK_PALETTE: WorldPalette = {
@@ -54,9 +64,16 @@ export const FALLBACK_PALETTE: WorldPalette = {
   people: ["#6d6875", "#b5838d", "#4f7ca3", "#8a9a5b"],
   steam: "#ffffff",
   bird: "#6d6875",
+  taxi: "#f6c945",
+  bus: "#5b8fd9",
+  skin: ["#f3cfb1", "#dcae8a", "#b07c5b", "#7d5139"],
+  shirts: ["#e8708f", "#4fb8a8", "#9b87d8", "#f2a65a", "#6ec5ee", "#8a9a5b"],
+  pants: ["#3f4a63", "#5c6b7f", "#6b5a4c", "#2f3a4a"],
+  avatar: "#ff7a59",
+  home: "#3b69d4",
 };
 
-const LIST_KEYS = ["leaf", "facades", "roofs", "awning", "cars", "people"] as const;
+const LIST_KEYS = ["leaf", "facades", "roofs", "awning", "cars", "people", "skin", "shirts", "pants"] as const;
 
 /** Reads `--w-<key>` (lists are comma-separated) from the root element; anything missing keeps its fallback. */
 export function worldPalette(root?: Element): WorldPalette {

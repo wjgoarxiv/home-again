@@ -36,7 +36,7 @@ describe("world palette", () => {
   });
 
   it("matches the --w-* values in app/globals.css", () => {
-    const list = ["leaf", "facades", "roofs", "awning", "cars", "people"];
+    const list = ["leaf", "facades", "roofs", "awning", "cars", "people", "skin", "shirts", "pants"];
     for (const [key, value] of Object.entries(FALLBACK_PALETTE)) {
       const kebab = key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
       const raw = cssVar(kebab);

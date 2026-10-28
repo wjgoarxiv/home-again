@@ -44,6 +44,13 @@
   --w-people: #6d6875, #b5838d, #4f7ca3, #8a9a5b;
   --w-steam: #ffffff;
   --w-bird: #6d6875;
+  --w-taxi: #f6c945;
+  --w-bus: #5b8fd9;
+  --w-skin: #f3cfb1, #dcae8a, #b07c5b, #7d5139;
+  --w-shirts: #e8708f, #4fb8a8, #9b87d8, #f2a65a, #6ec5ee, #8a9a5b;
+  --w-pants: #3f4a63, #5c6b7f, #6b5a4c, #2f3a4a;
+  --w-avatar: #ff7a59;
+  --w-home: #3b69d4;
 }
 
 @media (prefers-reduced-motion: reduce) {
