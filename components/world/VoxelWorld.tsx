@@ -57,6 +57,8 @@ const RISE_STEPS = 4;
 const RISE_MS = 110;
 /** Trips closer than this count as already there. */
 const ARRIVED_M = 3;
+/** Camera height ratio at full tilt: (1, STEEP_Y, 1) looks down at ~74 degrees instead of the isometric ~35. */
+const STEEP_Y = 5;
 /** The follow camera pauses this long on the arrived character before easing back to the overview. */
 const ARRIVE_HOLD_MS = 1000;
 const EASE_BACK_STEPS = 4;
@@ -114,6 +116,8 @@ type ThreeState = {
   /** The camera follows the character (trip under way, and the hold before it eases back). */
   follow: boolean;
   followZ: number;
+  /** 0 = isometric overview, 1 = steep street view used while following, so tall buildings don't hide the ride. */
+  tilt: number;
   camTimers: number[];
   guard: number | null;
   travelKey: string | null;
@@ -406,6 +410,7 @@ export default function VoxelWorld({
       tripMode: "auto",
       follow: false,
       followZ: 4.5,
+      tilt: 0,
       camTimers: [],
       guard: null,
       travelKey: null,
@@ -438,7 +443,7 @@ export default function VoxelWorld({
     fit();
 
     const render = () => {
-      const iso = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(240);
+      const iso = new THREE.Vector3(1, 1 + st.tilt * (STEEP_Y - 1), 1).normalize().multiplyScalar(240);
       camera.position.copy(st.target).add(iso);
       camera.lookAt(st.target);
       camera.updateProjectionMatrix();
@@ -536,16 +541,19 @@ export default function VoxelWorld({
           if (st.reduced) {
             st.target.copy(dest);
             camera.zoom = 1;
+            st.tilt = 0;
             renderNow();
             return;
           }
           const from = st.target.clone();
           const zoom0 = camera.zoom;
+          const tilt0 = st.tilt;
           let k = 0;
           const tick = () => {
             k++;
             st.target.lerpVectors(from, dest, k / EASE_BACK_STEPS);
             camera.zoom = zoom0 + ((1 - zoom0) * k) / EASE_BACK_STEPS;
+            st.tilt = tilt0 * (1 - k / EASE_BACK_STEPS);
             renderNow();
             if (k < EASE_BACK_STEPS) st.camTimers.push(window.setTimeout(tick, EASE_BACK_MS));
           };
@@ -573,6 +581,7 @@ export default function VoxelWorld({
         st.target.x += (s.x - st.target.x) * k;
         st.target.z += (s.z - st.target.z) * k;
         camera.zoom += (st.followZ - camera.zoom) * (1 - Math.exp(-dt * FOLLOW_ZOOM_RATE));
+        st.tilt += (1 - st.tilt) * (1 - Math.exp(-dt * FOLLOW_ZOOM_RATE));
       }
       if (s.done) settle(s);
     };
