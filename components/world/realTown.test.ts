@@ -8,6 +8,7 @@ import {
   heightUnits,
   inkScale,
   loadGeo,
+  parkTrees,
   sceneBuildings,
   slugOf,
   streetsForLife,
@@ -329,5 +330,25 @@ describe("ink LOD", () => {
     let moving = 0;
     for (let i = 0; i < a.count; i++) if (a.getX(i) !== 0 || a.getZ(i) !== 0) moving++;
     expect(moving).toBeGreaterThanOrEqual(4 * 2 + 2 * 2);
+  });
+});
+
+describe("parkTrees", () => {
+  const ev = { ...snap([]), meta: { ...snap([]).meta, area: "East Village, New York" } };
+
+  it("plants trees only in a known park, none on the home pad", () => {
+    expect(parkTrees(snap([]), FALLBACK_PALETTE)).toEqual([]);
+    const trees = parkTrees(ev, FALLBACK_PALETTE);
+    expect(trees.length).toBeGreaterThanOrEqual(2 * 12);
+    for (const t of trees) expect(Math.max(Math.abs(t.x), Math.abs(t.z))).toBeGreaterThanOrEqual(2.6 - 0.2);
+    expect(parkTrees(ev, FALLBACK_PALETTE)).toEqual(trees);
+  });
+
+  it("keeps clear of towers", () => {
+    const free = parkTrees(ev, FALLBACK_PALETTE);
+    const t = free[free.length - 1];
+    const kept = parkTrees(ev, FALLBACK_PALETTE, [{ x: t.x, z: t.z }]);
+    expect(kept.length).toBeLessThan(free.length);
+    for (const k of kept) expect(Math.max(Math.abs(k.x - t.x), Math.abs(k.z - t.z))).toBeGreaterThanOrEqual(2.6);
   });
 });

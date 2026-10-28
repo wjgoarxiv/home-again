@@ -276,6 +276,7 @@ export const ROAD_BASE_W = 0.55;
 export const ROAD_LANE_W = 0.2;
 const SIDEWALK_EXTRA = 0.3;
 const GROUND_HALF = 64;
+const Y_PARK = 0.008;
 const Y_SIDEWALK = 0.015;
 const Y_KERB = 0.022;
 const Y_ROAD = 0.03;
@@ -307,6 +308,42 @@ function patchInk(material: THREE.MeshLambertMaterial, uniform: { value: number 
       "#include <begin_vertex>\n  transformed += aInk * (uInk - 1.0);",
     );
   };
+}
+
+/** Hand-placed parks in scene units (street-grid frame), by area slug: the open block around the area centre. East Village centre is Tompkins Square Park. */
+export type Rect = { x0: number; z0: number; x1: number; z1: number };
+export const PARKS: Record<string, Rect[]> = {
+  "east-village": [{ x0: -5, z0: -4.5, x1: 3, z1: 3 }],
+};
+const parkRects = (snapshot: GeoSnapshot): Rect[] => PARKS[slugOf(snapshot.meta.area)] ?? [];
+
+export type TreeBox = { x: number; y: number; z: number; sx: number; sy: number; sz: number; color: string };
+const TREE_STEP = 1.5;
+/** Trees keep this far (scene units, chebyshev) from the home pad centre and from every tower. */
+const TREE_HOME_CLEAR = 2.6;
+const TREE_TOWER_CLEAR = 2.6;
+
+/**
+ * Trunk + canopy boxes for a few trees on the park, on a jittered grid; none on the home pad (scene origin) or near a tower.
+ * Pure and deterministic, so the same park always plants the same trees.
+ */
+export function parkTrees(snapshot: GeoSnapshot, p: WorldPalette, towers: { x: number; z: number }[] = []): TreeBox[] {
+  const out: TreeBox[] = [];
+  for (const r of parkRects(snapshot)) {
+    const inset = 0.7;
+    for (let x = r.x0 + inset; x <= r.x1 - inset; x += TREE_STEP) {
+      for (let z = r.z0 + inset; z <= r.z1 - inset; z += TREE_STEP) {
+        const k = hash(Math.round(x * 10), Math.round(z * 10));
+        const tx = x + ((k % 100) / 100 - 0.5) * 0.7, tz = z + (((k >> 7) % 100) / 100 - 0.5) * 0.7;
+        if (Math.max(Math.abs(tx), Math.abs(tz)) < TREE_HOME_CLEAR) continue;
+        if (towers.some((t) => Math.max(Math.abs(tx - t.x), Math.abs(tz - t.z)) < TREE_TOWER_CLEAR)) continue;
+        const size = 0.6 + ((k >> 3) % 35) / 100;
+        out.push({ x: tx, y: 0.25, z: tz, sx: 0.2, sy: 0.5, sz: 0.2, color: p.trunk });
+        out.push({ x: tx, y: 0.5 + size * 0.4, z: tz, sx: size, sy: size * 0.8, sz: size, color: p.leaf[k % p.leaf.length] });
+      }
+    }
+  }
+  return out;
 }
 
 class Mesh {
@@ -393,6 +430,11 @@ function buildFlat(snapshot: GeoSnapshot, p: WorldPalette): THREE.BufferGeometry
   wall(h, -h, -h, -h, 0, -1);
   wall(-h, -h, -h, h, -1, 0);
 
+  const grass = new THREE.Color(p.park);
+  for (const r of parkRects(snapshot)) {
+    const q = [m.vert(r.x0, Y_PARK, r.z0, 0, 1, 0, grass), m.vert(r.x1, Y_PARK, r.z0, 0, 1, 0, grass), m.vert(r.x1, Y_PARK, r.z1, 0, 1, 0, grass), m.vert(r.x0, Y_PARK, r.z1, 0, 1, 0, grass)];
+    m.quad(q[0], q[1], q[2], q[3], 0, 1, 0);
+  }
   const inside = (x: number, z: number) => Math.abs(x) < h && Math.abs(z) < h;
   for (const pass of ["side", "kerb", "road", "mark"] as const) {
     for (const s of snapshot.streets) {
@@ -539,6 +581,8 @@ export type RealTown = {
   /** Cheap per-turn change: hides buildings under the cafes and lowers their neighbours. */
   update: (cafes: CafeSpot[]) => void;
   stats: () => { buildings: number; triangles: number };
+  /** Tree boxes for the area's park (empty where the area has none), kept off the home pad and the given towers. */
+  trees: (towers: { x: number; z: number }[]) => TreeBox[];
   /** Keep ink lines a similar pixel width at any camera zoom (call each frame; cheap uniform write). */
   setZoom: (zoom: number) => void;
   dispose: () => void;
@@ -610,6 +654,7 @@ export function buildRealTown(snapshot: GeoSnapshot, palette: WorldPalette, opts
     streets: streetsForLife(snapshot).filter((st) => st.length >= LIFE_MIN_UNITS).slice(0, LIFE_STREETS),
     drawCalls: 2,
     update,
+    trees: (towers) => parkTrees(snapshot, palette, towers),
     setZoom: (zoom) => {
       inkUniform.value = inkScale(zoom);
     },

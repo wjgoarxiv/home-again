@@ -1045,6 +1045,18 @@ export default function VoxelWorld({
       content.add(lots);
     }
 
+    if (st.realTown) {
+      const trees = st.realTown.trees(scene.towers);
+      if (trees.length > 0) {
+        const grove = boxMesh(trees.length, world.trunk);
+        grove.userData.layer = "trees";
+        trees.forEach((t, i) => place(grove, i, t.x, t.y, t.z, t.sx, t.sy, t.sz, t.color));
+        grove.instanceMatrix.needsUpdate = true;
+        if (grove.instanceColor) grove.instanceColor.needsUpdate = true;
+        content.add(grove);
+      }
+    }
+
     const homeBase = LOT_Y;
     const homeMesh = boxMesh(5, palette.accent2);
     homeMesh.userData.layer = "home";
