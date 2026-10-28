@@ -65,7 +65,7 @@ export const FALLBACK_PALETTE: WorldPalette = {
   steam: "#ffffff",
   bird: "#6d6875",
   taxi: "#f6c945",
-  bus: "#5b8fd9",
+  bus: "#4aa6c9",
   skin: ["#f3cfb1", "#dcae8a", "#b07c5b", "#7d5139"],
   shirts: ["#e8708f", "#4fb8a8", "#9b87d8", "#f2a65a", "#6ec5ee", "#8a9a5b"],
   pants: ["#3f4a63", "#5c6b7f", "#6b5a4c", "#2f3a4a"],

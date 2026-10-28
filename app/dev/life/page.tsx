@@ -5,7 +5,10 @@ import { notFound } from "next/navigation";
 import * as THREE from "three";
 import { createLife } from "../../../components/world/life";
 import { worldPalette } from "../../../components/world/palette";
+import { createTraveler } from "../../../components/world/traveler";
 import type { Spot, Street } from "../../../lib/life";
+import type { P, TravelMode, Trip } from "../../../lib/route";
+import { UNIT_M } from "../../../lib/world";
 
 const GRID = [-15, -9, -3, 3, 9, 15];
 const STREETS: Street[] = [
@@ -20,8 +23,31 @@ const SPOTS: Spot[] = [
 
 const CAMERAS = {
   wide: { pos: [34, 34, 34], look: [0, 0, 0] },
-  close: { pos: [7, 4.2, 9], look: [0, 0.6, 0] },
+  close: { pos: [5.6, 1.9, 6.0], look: [2.6, 0.1, 2.8] },
 } as const;
+
+// Road ribbons as in components/world/realTown.ts: 0.55 + 0.2 per lane wide, a 0.15 sidewalk strip each side, tops at 0.03 / 0.015.
+const roadW = (lanes: 1 | 2) => 0.55 + 0.2 * lanes;
+
+// The synthetic L-shaped trip: east along z = 3, then north along x = 3.
+const TRIP_POINTS: P[] = [
+  { x: -5, z: 3 },
+  { x: 3, z: 3 },
+  { x: 3, z: -5 },
+];
+const MODES: TravelMode[] = ["walk", "taxi", "bus"];
+const TRIP_SECONDS: Record<TravelMode, number> = { walk: 8, taxi: 5, bus: 6 };
+const tripOf = (mode: TravelMode): Trip => ({ mode, points: TRIP_POINTS, lengthM: 16 * UNIT_M, durationSec: TRIP_SECONDS[mode] });
+
+function rngOf(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export default function DevLifePage() {
   if (process.env.NODE_ENV === "production") notFound();
@@ -30,10 +56,14 @@ export default function DevLifePage() {
   const [staticNote, setStaticNote] = useState(false);
   const [close, setClose] = useState(false);
   const [density, setDensity] = useState<0 | 1>(1);
+  const [nextMode, setNextMode] = useState<TravelMode>("walk");
+  const [stats, setStats] = useState("");
   const closeRef = useRef(close);
   const refitRef = useRef<() => void>(() => {});
+  const sendRef = useRef<(mode: TravelMode) => void>(() => {});
 
-  // `?view=close` and `?density=0` open the page in that state (the interface probe cannot click).
+  // `?view=close`, `?density=0`, `?trip=walk|taxi|bus` (loops the trip) and `?at=0.4` (freeze it at that progress)
+  // open the page in that state, because the interface probe cannot click.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     if (q.get("view") === "close") setClose(true);
@@ -76,20 +106,63 @@ export default function DevLifePage() {
     ground.position.y = -0.5;
     root.add(ground);
 
+    const sidewalkMat = new THREE.MeshLambertMaterial({ color: palette.sidewalk });
     const streetMat = new THREE.MeshLambertMaterial({ color: palette.road });
-    for (const st of STREETS) {
-      const geo =
-        st.dir === "x" ? new THREE.BoxGeometry(st.length, 0.12, 1.6) : new THREE.BoxGeometry(1.6, 0.12, st.length);
-      const mesh = new THREE.Mesh(geo, streetMat);
-      mesh.position.set(st.dir === "x" ? st.x + st.length / 2 : st.x, 0.06, st.dir === "x" ? st.z : st.z + st.length / 2);
+    const markMat = new THREE.MeshLambertMaterial({ color: palette.marking });
+    const ribbon = (st: Street, width: number, top: number, mat: THREE.Material, from = 0, to = st.length) => {
+      const len = to - from;
+      const geo = st.dir === "x" ? new THREE.BoxGeometry(len, top, width) : new THREE.BoxGeometry(width, top, len);
+      const mesh = new THREE.Mesh(geo, mat);
+      const mid = from + len / 2;
+      mesh.position.set(st.dir === "x" ? st.x + mid : st.x, top / 2, st.dir === "x" ? st.z : st.z + mid);
       root.add(mesh);
+    };
+    for (const st of STREETS) {
+      ribbon(st, roadW(st.lanes) + 0.3, 0.015, sidewalkMat);
+      ribbon(st, roadW(st.lanes), 0.03, streetMat);
+      if (st.lanes === 2) {
+        for (let d = 0.25; d + 0.5 <= st.length - 0.25; d += 1) {
+          const dash = st.dir === "x" ? new THREE.BoxGeometry(0.5, 0.045, 0.07) : new THREE.BoxGeometry(0.07, 0.045, 0.5);
+          const mesh = new THREE.Mesh(dash, markMat);
+          mesh.position.set(st.dir === "x" ? st.x + d + 0.25 : st.x, 0.0225, st.dir === "x" ? st.z : st.z + d + 0.25);
+          root.add(mesh);
+        }
+      }
     }
+
+    // Real-size neighbours: 0.45-0.75 wide and 1.6-7 tall (NYC heights are exaggerated about 2.5x), so cars and people can be judged against them.
+    const rng = rngOf(7);
+    const lots: { x: number; z: number; w: number; d: number; h: number }[] = [];
+    for (let bi = 0; bi < GRID.length - 1; bi++) {
+      for (let bj = 0; bj < GRID.length - 1; bj++) {
+        const cx = (GRID[bi] + GRID[bi + 1]) / 2;
+        const cz = (GRID[bj] + GRID[bj + 1]) / 2;
+        for (let i = -2; i <= 2; i++) {
+          for (let j = -2; j <= 2; j++) {
+            const x = cx + i * 0.85;
+            const z = cz + j * 0.85;
+            if (SPOTS.some((t) => Math.abs(x - t.x) < 1.6 && Math.abs(z - t.z) < 1.6)) continue;
+            if (x > 3.6 && z > 3.6 && x < 8.4 && z < 8.4) continue; // the close-up camera's own block stays open so it can look across it
+            if (rng() < 0.18) continue;
+            lots.push({ x, z, w: 0.45 + rng() * 0.3, d: 0.45 + rng() * 0.3, h: 1.6 + rng() * rng() * 5.4 });
+          }
+        }
+      }
+    }
+    const homes = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff }), lots.length);
+    const m4 = new THREE.Matrix4();
+    const noTurn = new THREE.Quaternion();
+    lots.forEach((b, i) => {
+      homes.setMatrixAt(i, m4.compose(new THREE.Vector3(b.x, b.h / 2, b.z), noTurn, new THREE.Vector3(b.w, b.h, b.d)));
+      homes.setColorAt(i, new THREE.Color(palette.facades[i % palette.facades.length]));
+    });
+    root.add(homes);
 
     const capMat = new THREE.MeshLambertMaterial({ color: palette.roofs[0] });
     SPOTS.forEach((spot, si) => {
       const towerMat = new THREE.MeshLambertMaterial({ color: palette.facades[si % palette.facades.length] });
       for (let v = 0; v < spot.height; v++) {
-        const vox = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1, 1.8), v === spot.height - 1 ? capMat : towerMat);
+        const vox = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1, 1.2), v === spot.height - 1 ? capMat : towerMat);
         vox.position.set(spot.x, v + 0.5, spot.z);
         root.add(vox);
       }
@@ -114,6 +187,27 @@ export default function DevLifePage() {
 
     const life = createLife({ scene: root, streets: STREETS, spots: SPOTS, seed: 20261028, density, palette });
     life.update(0);
+    const traveler = createTraveler({ scene: root, palette });
+    traveler.place(TRIP_POINTS[0].x, TRIP_POINTS[0].z);
+    const q = new URLSearchParams(window.location.search);
+    const loopMode = MODES.find((m) => m === q.get("trip")) ?? null;
+    const holdAt = q.has("at") ? Math.min(1, Math.max(0, Number(q.get("at")) || 0)) : null;
+    let holdUntil = 0;
+    let frozen = false;
+    const send = (mode: TravelMode) => {
+      const trip = tripOf(mode);
+      traveler.place(TRIP_POINTS[0].x, TRIP_POINTS[0].z);
+      traveler.start(trip);
+      if (reduced) traveler.finish();
+      else if (holdAt !== null) {
+        traveler.update(trip.durationSec * holdAt);
+        frozen = true;
+      }
+      renderer.render(root, camera);
+    };
+    sendRef.current = send;
+    if (loopMode) send(loopMode);
+    const meshCount = () => root.children.filter((c) => /^(cars|buses|people|steam|birds|signals|traveler)/.test(c.name)).length;
     renderer.render(root, camera);
 
     let raf = 0;
@@ -130,10 +224,23 @@ export default function DevLifePage() {
       last = now;
       if (!visible || document.visibilityState !== "visible") return;
       life.update(dt);
+      if (!frozen) {
+        const s = traveler.update(dt);
+        if (loopMode && s.done) {
+          if (holdUntil === 0) holdUntil = now + 1200;
+          else if (now >= holdUntil) {
+            holdUntil = 0;
+            send(loopMode);
+          }
+        }
+      }
       renderer.render(root, camera);
       frames++;
       if (now - meterLast >= 500) {
-        setFps(Math.round((frames * 1000) / (now - meterLast)));
+        const fpsNow = Math.round((frames * 1000) / (now - meterLast));
+        setFps(fpsNow);
+        const info = renderer.info.render;
+        setStats(`MESHES ${meshCount()} · DRAW CALLS ${info.calls} · TRIANGLES ${info.triangles}`);
         frames = 0;
         meterLast = now;
       }
@@ -153,6 +260,7 @@ export default function DevLifePage() {
 
     if (reduced) {
       setStaticNote(true);
+      setStats(`MESHES ${meshCount()} · DRAW CALLS ${renderer.info.render.calls} · TRIANGLES ${renderer.info.render.triangles}`);
     } else {
       raf = requestAnimationFrame(tick);
     }
@@ -164,6 +272,8 @@ export default function DevLifePage() {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", onResize);
       life.dispose();
+      traveler.dispose();
+      sendRef.current = () => {};
       root.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (mesh.isMesh) {
@@ -204,6 +314,16 @@ export default function DevLifePage() {
         >
           {density === 1 ? "DENSITY 0" : "DENSITY 1"}
         </button>
+        <button
+          type="button"
+          className="ui-btn ui-btn--sm"
+          onClick={() => {
+            sendRef.current(nextMode);
+            setNextMode(MODES[(MODES.indexOf(nextMode) + 1) % MODES.length]);
+          }}
+        >
+          Send traveller ({nextMode})
+        </button>
       </div>
       <p
         className="ui-meta"
@@ -216,8 +336,9 @@ export default function DevLifePage() {
           STREETS {STREETS.length} · TOWERS {SPOTS.length}
         </span>
         <span className="block">
-          DENSITY {density} · {close ? "CLOSE-UP" : "WIDE"}
+          DENSITY {density} · {close ? "CLOSE-UP" : "WIDE"} · TRAVELLER NEXT {nextMode.toUpperCase()}
         </span>
+        <span className="block">{stats}</span>
       </p>
     </main>
   );
