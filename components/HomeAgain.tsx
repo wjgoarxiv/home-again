@@ -429,8 +429,15 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                   </ol>
                   <div className="[@media(max-height:760px)]:hidden" aria-label="Example result">
                     <div className="ui-callout" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
-                      <p className="ui-label">Example</p>
-                      <p className="ui-small">Your old regular → new regular, because: quiet, espresso, pastries.</p>
+                      <p className="ui-label">What you get, for example</p>
+                      <p className="ui-small">
+                        <b>Your old café in Seoul</b> → an East Village café that shares its taste tags on Qloo, like:
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {["espresso", "pastries", "quiet"].map((t) => (
+                          <span key={t} className="ui-tag ui-tag--accent">{t}</span>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </>
