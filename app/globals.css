@@ -31,15 +31,15 @@
 :root {
   --w-sky: #d6ebfa;
   --w-ground: #f1ece1;
-  --w-sidewalk: #e6e0d3;
-  --w-road: #a3abb5;
+  --w-sidewalk: #ebe5d8;
+  --w-road: #8f98a6;
   --w-marking: #ffffff;
   --w-crossing: #fdfcf7;
   --w-park: #c3e6c4;
   --w-leaf: #9fd8a6, #b8e3a3, #8ecfb2;
   --w-trunk: #a9846b;
   --w-facades: #f6c9c4, #fbd9b3, #fbefb8, #cbe8d2, #c9ddf3, #dacdf1, #f3d6e7;
-  --w-roofs: #ebe6de, #d2d9e1, #bdb6ac;
+  --w-roofs: #f2eee7, #dde3ea, #cbc5bb;
   --w-glass: #93b6d2;
   --w-lit-window: #ffe8a3;
   --w-awning: #f08a8a, #7fb7e6, #8fd0a5, #f2b66d;

@@ -286,6 +286,8 @@ const CORNER_W = 0.07;
 const KERB_W = 0.07;
 /** Wall base colour factor: a soft ground-contact shade so tall blocks stand on the street instead of floating. */
 const BASE_SHADE = 0.88;
+/** One shared mute for every facade (saturation factor), so the city stays quiet and ink, towers and the home carry the hierarchy. 1 = the palette as is. */
+export const FACADE_MUTE = 0.8;
 /** Ink LOD (static, by size): edges shorter than this get no rim, shorter than CORNER_MIN_LEN or on buildings under CORNER_MIN_H no vertical strip. */
 const RIM_MIN_LEN = 0.3;
 const CORNER_MIN_LEN = 0.5;
@@ -422,10 +424,16 @@ type Span = { v0: number; vWall: number; vEnd: number; i0: number; iEnd: number;
 
 const hash = (a: number, b: number): number => (Math.imul(a + 1, 2654435761) ^ Math.imul(b + 7, 40503)) >>> 0;
 
+const hsl = { h: 0, s: 0, l: 0 };
+function mute(c: THREE.Color): THREE.Color {
+  c.getHSL(hsl);
+  return c.setHSL(hsl.h, hsl.s * FACADE_MUTE, hsl.l);
+}
+
 function addBuilding(m: Mesh, b: SceneBuilding, p: WorldPalette): Span {
   const span: Span = { v0: m.pos.length / 3, vWall: 0, vEnd: 0, i0: m.idx.length, iEnd: 0, h0: b.h };
   const band = Math.floor(b.h / 1.5);
-  const wallCol = new THREE.Color(p.facades[hash(b.id, band) % p.facades.length]);
+  const wallCol = mute(new THREE.Color(p.facades[hash(b.id, band) % p.facades.length]));
   const roofCol = new THREE.Color(p.roofs[hash(b.id, 3) % p.roofs.length]);
   const wallFoot = wallCol.clone().multiplyScalar(BASE_SHADE);
   const ink = new THREE.Color(p.outline);
