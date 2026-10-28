@@ -61,7 +61,10 @@ export async function handleTurn(raw: unknown, sessionId: string, env: TurnEnv):
   try {
     const result = await runAgent(state, deps, widen ? { radiusM: WIDE_RADIUS_M } : {});
     console.info("turn", result.source, `in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
-    const next = { ...state, shown: result.cards.map((c) => c.entityId) };
+    const shown = result.cards.map((c) => c.entityId);
+    const snapshots = result.candidates.filter((c) => shown.includes(c.id)).map(({ distanceM: _d, ...cafe }) => cafe);
+    const keep = state.saved.filter((c) => state.liked.includes(c.id) && !shown.includes(c.id));
+    const next = { ...state, shown, saved: [...keep, ...snapshots].slice(-12) };
     return { status: 200, body: { state: next, cards: result.cards, notice: result.notice, widenOffer: result.widenOffer, source: result.source } };
   } catch (err) {
     return failure(err);

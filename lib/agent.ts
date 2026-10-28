@@ -1,7 +1,8 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { excludedIds, radiusForWeek } from "./journey";
+import { haversineM } from "./geo";
+import { excludedIds, radiusForWeek, revisitId } from "./journey";
 import { LimitError } from "./limits";
 import { SYSTEM_PROMPT, TOOLS, userTurn } from "./prompts";
 import { QlooError, sharedTaste, type Candidate } from "./qloo";
@@ -24,6 +25,8 @@ export type AgentResult = {
   notice: string | null;
   widenOffer: boolean;
   usage: { inputTokens: number; outputTokens: number };
+  /** The candidates this round chose from, so the route can save the shown ones. */
+  candidates: Candidate[];
 };
 
 const SubmitSchema = z.object({
@@ -87,22 +90,34 @@ function byAffinity(found: Candidate[]): Candidate[] {
   return [...found].sort((a, b) => (b.affinity ?? -1) - (a.affinity ?? -1)).slice(0, MAX_CANDIDATES);
 }
 
+/**
+ * Qloo leaves a signal entity out of its own recommendations, so the loved café never comes back by
+ * itself. Put it first from the saved snapshot, whatever this week's radius is: it is your spot.
+ */
+function withRevisit(found: Candidate[], state: JourneyState): Candidate[] {
+  const id = revisitId(state);
+  if (!id || found.some((c) => c.id === id)) return found;
+  const saved = state.saved.find((c) => c.id === id);
+  if (!saved) return found;
+  return [{ ...saved, distanceM: Math.round(haversineM(state.area, saved)) }, ...found].slice(0, MAX_CANDIDATES);
+}
+
 /** One week's round: the model looks up candidates and writes cards; code checks every card and falls back if needed. */
 export async function runAgent(state: JourneyState, deps: AgentDeps, opts: { radiusM?: number } = {}): Promise<AgentResult> {
   const radiusM = opts.radiusM ?? radiusForWeek(state.week);
   const query = { area: state.area, radiusM, signalIds: [...new Set([state.seed.id, ...state.liked])], excludeIds: excludedIds(state) };
   const usage = { inputTokens: 0, outputTokens: 0 };
   let candidates: Candidate[] | null = null;
-  const lookup = async () => (candidates ??= byAffinity(await deps.findCandidates(query)));
+  const lookup = async () => (candidates ??= withRevisit(byAffinity(await deps.findCandidates(query)), state));
 
   const empty = (): AgentResult => {
     const widenOffer = radiusM < WIDE_RADIUS_M;
     const notice = widenOffer ? `Coverage is thin here. Widen to ${WIDE_RADIUS_M} m?` : `Coverage is thin here, even at ${WIDE_RADIUS_M} m.`;
-    return { cards: [], source: "empty", notice, widenOffer, usage };
+    return { cards: [], source: "empty", notice, widenOffer, usage, candidates: [] };
   };
   const fallback = async (): Promise<AgentResult> => {
     const found = await lookup();
-    return found.length ? { cards: fallbackCards(found, state), source: "fallback", notice: null, widenOffer: false, usage } : empty();
+    return found.length ? { cards: fallbackCards(found, state), source: "fallback", notice: null, widenOffer: false, usage, candidates: found } : empty();
   };
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userTurn(state, radiusM) }];
@@ -125,7 +140,7 @@ export async function runAgent(state: JourneyState, deps: AgentDeps, opts: { rad
           results.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(view) });
         } else if (call.name === "submit_cards" && candidates) {
           const checked = validateCards(call.input, candidates, state);
-          if (checked.ok) return { cards: checked.cards, source: "agent", notice: null, widenOffer: false, usage };
+          if (checked.ok) return { cards: checked.cards, source: "agent", notice: null, widenOffer: false, usage, candidates };
           if (++badSubmits > 1) return await fallback();
           results.push({ type: "tool_result", tool_use_id: call.id, is_error: true, content: checked.errors.join("\n") });
         } else {

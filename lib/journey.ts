@@ -17,6 +17,7 @@ export function startJourney(seed: Seed, area: Area): JourneyState {
     rejected: [],
     seen: [],
     shown: [],
+    saved: [],
     loves: {},
     regular: null,
     done: false,

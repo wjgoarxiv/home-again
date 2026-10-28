@@ -17,6 +17,17 @@ export const AreaSchema = z.object({
 const Id = z.string().min(1).max(100);
 const Ids = z.array(Id).max(50);
 
+/** What the app keeps of a café it showed, so a loved one can come back when Qloo leaves out its own signal. */
+export const SavedCafeSchema = z.object({
+  id: Id,
+  name: z.string().min(1).max(200),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  address: z.string().max(300).optional(),
+  affinity: z.number().nullable(),
+  tags: z.array(z.string().min(1).max(80)).max(200),
+});
+
 export const JourneyStateSchema = z.object({
   seed: SeedSchema,
   area: AreaSchema,
@@ -26,6 +37,7 @@ export const JourneyStateSchema = z.object({
   rejected: Ids,
   seen: Ids,
   shown: Ids,
+  saved: z.array(SavedCafeSchema).max(12).default([]),
   loves: z.record(Id, z.number().int().min(0)),
   regular: Id.nullable(),
   done: z.boolean(),

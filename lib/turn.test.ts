@@ -43,6 +43,16 @@ describe("handleTurn", () => {
     expect(body.state.shown).toEqual(["TEST-0001", "TEST-0002"]);
   });
 
+  it("saves a snapshot of shown cafés and keeps only the loved ones afterwards", async () => {
+    const week1 = (await handleTurn({ state: startJourney(seed, area) }, "s1", env())).body as { state: { saved: { id: string; name: string }[] } };
+    expect(week1.state.saved.map((s) => s.id)).toEqual(["TEST-0001", "TEST-0002"]);
+    expect(week1.state.saved[0]).not.toHaveProperty("distanceM");
+    const next = await handleTurn({ state: week1.state, feedback: [{ id: "TEST-0001", verdict: "love" }, { id: "TEST-0002", verdict: "meh" }] }, "s1", env({ findCandidates: vi.fn(async () => []) }));
+    const body = next.body as { state: { saved: { id: string }[] }; cards: { entityId: string; revisit: boolean }[] };
+    expect(body.cards).toMatchObject([{ entityId: "TEST-0001", revisit: true }]);
+    expect(body.state.saved.map((s) => s.id)).toEqual(["TEST-0001"]);
+  });
+
   it("accepts a seed with as many taste tags as a real Qloo place carries", async () => {
     const tagged = { ...seed, tags: Array.from({ length: 80 }, (_, i) => `Tag ${i}`) };
     expect((await handleTurn({ state: startJourney(tagged, area) }, "s1", env())).status).toBe(200);
