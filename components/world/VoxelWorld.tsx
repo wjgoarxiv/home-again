@@ -128,7 +128,16 @@ type ThreeState = {
   travelKey: string | null;
   startTrip: (to: { id: string; x: number; z: number }) => void;
   cancelTrip: () => void;
+  /** Camera dock: zoom by a factor, glide back to the overview, or take the character back into the follow camera. */
+  zoomBy: (factor: number) => void;
+  goHome: () => void;
+  refollow: () => void;
 };
+
+/** The camera dock's buttons light up only when there is something to undo. */
+type CamUi = { moved: boolean; trip: boolean; following: boolean };
+const KEY_PAN_FRACTION = 0.12;
+const DOCK_BTN = { minWidth: 44, minHeight: 44, padding: 0, justifyContent: "center", fontSize: 20, lineHeight: 1 } as const;
 
 function readPalette(): Palette {
   const css = (name: string, fallback: string) => {
@@ -347,6 +356,7 @@ export default function VoxelWorld({
     hidden?: boolean;
   }>({ left: 0, top: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [camUi, setCamUi] = useState<CamUi>({ moved: false, trip: false, following: false });
   const threeRef = useRef<ThreeState | null>(null);
 
   useEffect(() => {
@@ -358,6 +368,9 @@ export default function VoxelWorld({
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setClearColor(new THREE.Color(world.sky));
     container.appendChild(renderer.domElement);
+    renderer.domElement.tabIndex = 0;
+    renderer.domElement.setAttribute("role", "application");
+    renderer.domElement.setAttribute("aria-label", "Map. Arrow keys pan, plus and minus zoom, 0 returns to the overview.");
     Object.assign(renderer.domElement.style, {
       position: "absolute",
       inset: "0",
@@ -429,6 +442,9 @@ export default function VoxelWorld({
       travelKey: null,
       startTrip: () => {},
       cancelTrip: () => {},
+      zoomBy: () => {},
+      goHome: () => {},
+      refollow: () => {},
     };
     threeRef.current = st;
 
@@ -467,6 +483,10 @@ export default function VoxelWorld({
       container.dataset.tris = String(renderer.info.render.triangles);
       container.dataset.cam = `${camera.zoom.toFixed(2)} ${st.target.x.toFixed(1)} ${st.target.z.toFixed(1)}`;
       container.dataset.pos = `${st.pos.x.toFixed(1)} ${st.pos.z.toFixed(1)}`;
+      const home = overview();
+      const moved = Math.abs(camera.zoom - 1) > 0.05 || st.tilt > 0.05 || Math.hypot(st.target.x - home.x, st.target.z - home.z) > 0.6;
+      const trip = st.trip !== null;
+      setCamUi((u) => (u.moved === moved && u.trip === trip && u.following === st.follow ? u : { moved, trip, following: st.follow }));
       updateLabels();
     };
     st.render = render;
@@ -611,35 +631,35 @@ export default function VoxelWorld({
       const focus = st.lastFocus ? sceneRef.current.towers.find((t) => t.id === st.lastFocus) : null;
       return new THREE.Vector3(focus ? focus.x : 0, 0, focus ? focus.z : 0);
     };
+    /** Glide (or jump, under reduced motion) back to the resting overview. */
+    const glideHome = () => {
+      st.camTimers = [];
+      st.follow = false;
+      const dest = overview();
+      if (st.reduced) {
+        st.target.copy(dest);
+        camera.zoom = 1;
+        st.tilt = 0;
+        renderNow();
+        return;
+      }
+      const from = st.target.clone();
+      const zoom0 = camera.zoom;
+      const tilt0 = st.tilt;
+      let k = 0;
+      const tick = () => {
+        k++;
+        st.target.lerpVectors(from, dest, k / EASE_BACK_STEPS);
+        camera.zoom = zoom0 + ((1 - zoom0) * k) / EASE_BACK_STEPS;
+        st.tilt = tilt0 * (1 - k / EASE_BACK_STEPS);
+        renderNow();
+        if (k < EASE_BACK_STEPS) st.camTimers.push(window.setTimeout(tick, EASE_BACK_MS));
+      };
+      tick();
+    };
     const easeBack = () => {
       clearCamTimers();
-      st.camTimers.push(
-        window.setTimeout(() => {
-          st.camTimers = [];
-          st.follow = false;
-          const dest = overview();
-          if (st.reduced) {
-            st.target.copy(dest);
-            camera.zoom = 1;
-            st.tilt = 0;
-            renderNow();
-            return;
-          }
-          const from = st.target.clone();
-          const zoom0 = camera.zoom;
-          const tilt0 = st.tilt;
-          let k = 0;
-          const tick = () => {
-            k++;
-            st.target.lerpVectors(from, dest, k / EASE_BACK_STEPS);
-            camera.zoom = zoom0 + ((1 - zoom0) * k) / EASE_BACK_STEPS;
-            st.tilt = tilt0 * (1 - k / EASE_BACK_STEPS);
-            renderNow();
-            if (k < EASE_BACK_STEPS) st.camTimers.push(window.setTimeout(tick, EASE_BACK_MS));
-          };
-          tick();
-        }, ARRIVE_HOLD_MS),
-      );
+      st.camTimers.push(window.setTimeout(glideHome, ARRIVE_HOLD_MS));
     };
     const settle = (at: { x: number; z: number }) => {
       const done = st.trip;
@@ -760,6 +780,42 @@ export default function VoxelWorld({
       st.follow = false;
       clearCamTimers();
     };
+    st.zoomBy = (factor) => {
+      takeCamera();
+      camera.zoom = clampZoom(camera.zoom * factor);
+      renderNow();
+    };
+    st.goHome = () => {
+      clearCamTimers();
+      glideHome();
+    };
+    st.refollow = () => {
+      if (!st.trip || st.reduced) return;
+      clearCamTimers();
+      st.follow = true;
+      st.followZ = followZoom(st.fitHalf);
+      startLoop();
+    };
+    /** Keyboard: arrows pan, + / - zoom, 0 or Home returns to the overview. */
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+      const dir = arrows[e.key];
+      if (dir) {
+        takeCamera();
+        const step = KEY_PAN_FRACTION * (camera.right * 2) / camera.zoom;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).setY(0).normalize();
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).setY(0).normalize();
+        st.target.addScaledVector(right, dir[0] * step).addScaledVector(up, dir[1] * step);
+        st.target.x = Math.min(st.panLimit, Math.max(-st.panLimit, st.target.x));
+        st.target.z = Math.min(st.panLimit, Math.max(-st.panLimit, st.target.z));
+        renderNow();
+      } else if (e.key === "+" || e.key === "=") st.zoomBy(1.4);
+      else if (e.key === "-" || e.key === "_") st.zoomBy(1 / 1.4);
+      else if (e.key === "0" || e.key === "Home") st.goHome();
+      else return;
+      e.preventDefault();
+    };
     const onPointerDown = (e: PointerEvent) => {
       takeCamera();
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -815,6 +871,7 @@ export default function VoxelWorld({
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("keydown", onKeyDown);
     const observer = new ResizeObserver(() => {
       fit();
       renderNow();
@@ -846,6 +903,7 @@ export default function VoxelWorld({
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("keydown", onKeyDown);
       const stNow = threeRef.current;
       if (stNow) {
         stNow.stepTimers.forEach((t) => window.clearTimeout(t));
@@ -1190,6 +1248,34 @@ export default function VoxelWorld({
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
+      <div
+        role="group"
+        aria-label="Camera"
+        className="absolute z-10 flex flex-col"
+        style={{ right: 8, bottom: "calc(var(--stage-inset-bottom, 0px) + 44px)", gap: 6 }}
+      >
+        {camUi.trip && !camUi.following && (
+          <button type="button" className="ui-btn ui-btn--primary" style={{ minHeight: 44 }} onClick={() => threeRef.current?.refollow()}>
+            Follow
+          </button>
+        )}
+        <button type="button" className="ui-btn" aria-label="Zoom in" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(1.6)}>
+          +
+        </button>
+        <button type="button" className="ui-btn" aria-label="Zoom out" style={DOCK_BTN} onClick={() => threeRef.current?.zoomBy(1 / 1.6)}>
+          &minus;
+        </button>
+        <button
+          type="button"
+          className="ui-btn"
+          aria-label="Back to overview"
+          disabled={!camUi.moved}
+          style={{ ...DOCK_BTN, fontSize: "var(--fs-xs)" }}
+          onClick={() => threeRef.current?.goHome()}
+        >
+          Reset
+        </button>
+      </div>
       <div
         className="ui-meta pointer-events-none absolute z-10 px-2 py-1"
         style={{
