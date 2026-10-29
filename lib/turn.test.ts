@@ -17,6 +17,7 @@ function env(overrides: Partial<AgentDeps> = {}): TurnEnv {
   return {
     store: memoryStore(),
     llmRoundsPerSession: 6,
+    llmRoundsPerDay: 120,
     agentDeps: {
       createMessage: vi.fn(async () => {
         throw new Error("no model in tests");
@@ -117,6 +118,23 @@ describe("handleTurn", () => {
     await handleTurn({ state: startJourney(seed, area) }, "s1", e);
     await handleTurn({ state: startJourney(seed, area) }, "s1", e);
     expect(e.agentDeps.createMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops calling the model for everyone once the day's rounds are spent, and still answers", async () => {
+    const e = { ...env(), llmRoundsPerDay: 1 };
+    await handleTurn({ state: startJourney(seed, area) }, "s1", e);
+    const reply = await handleTurn({ state: startJourney(seed, area) }, "s2", e);
+    expect(e.agentDeps.createMessage).toHaveBeenCalledTimes(1);
+    expect(reply.status).toBe(200);
+    expect((reply.body as { cards: unknown[] }).cards.length).toBeGreaterThan(0);
+  });
+
+  it("does not spend the day's rounds on a session that is already over its own cap", async () => {
+    const e = { ...env(), llmRoundsPerSession: 1, llmRoundsPerDay: 2 };
+    await handleTurn({ state: startJourney(seed, area) }, "s1", e);
+    await handleTurn({ state: startJourney(seed, area) }, "s1", e);
+    await handleTurn({ state: startJourney(seed, area) }, "s2", e);
+    expect(e.agentDeps.createMessage).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -108,6 +108,7 @@ Open http://localhost:3000 and press the example button.
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | no; without them the cache and caps live in memory | |
 | `QLOO_SESSION_CAP`, `QLOO_DAILY_CAP` | no | 8, 300 |
 | `LLM_SESSION_ROUNDS` | no | 6 |
+| `LLM_DAILY_ROUNDS` (model rounds for all visitors per UTC day; past it cards come from Qloo's ranking) | no | 120 |
 
 Checks: `pnpm test`, `pnpm typecheck`, `pnpm build`.
 

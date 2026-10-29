@@ -13,6 +13,8 @@ export type Match = { id: string; name: string; address?: string; tags: string[]
 export type TurnEnv = {
   store: Store;
   llmRoundsPerSession: number;
+  /** Model rounds for all sessions together per UTC day; past it every turn uses the deterministic fallback. */
+  llmRoundsPerDay: number;
   agentDeps: AgentDeps;
   search: (name: string, city?: string) => Promise<Match[]>;
 };
@@ -71,12 +73,15 @@ export async function handleTurn(raw: unknown, sessionId: string, env: TurnEnv):
   }
   if (state.done) return { status: 200, body: { state, cards: [], notice: null, widenOffer: false, source: "done" } };
 
-  // Past the session's model rounds the agent still answers, from the deterministic fallback.
+  // Past the session's or the day's model rounds the agent still answers, from the deterministic fallback.
+  // The day counter only moves for sessions still inside their own cap.
   const rounds = await env.store.incr(`llm:${sessionId}`, SESSION_TTL_SEC);
-  const deps: AgentDeps =
-    rounds > env.llmRoundsPerSession
-      ? { ...env.agentDeps, createMessage: () => Promise.reject(new Error("model rounds spent")) }
-      : env.agentDeps;
+  const day = new Date().toISOString().slice(0, 10);
+  const spent =
+    rounds > env.llmRoundsPerSession || (await env.store.incr(`llm-day:${day}`, 26 * 60 * 60)) > env.llmRoundsPerDay;
+  const deps: AgentDeps = spent
+    ? { ...env.agentDeps, createMessage: () => Promise.reject(new Error("model rounds spent")) }
+    : env.agentDeps;
 
   try {
     const started = Date.now();
@@ -113,9 +118,10 @@ export function liveEnv(sessionId: string): TurnEnv {
   const createMessage: AgentDeps["createMessage"] = (params) =>
     client ? client.messages.create(params) : Promise.reject(new Error("ANTHROPIC_API_KEY is not set"));
   const llmRoundsPerSession = Number(process.env.LLM_SESSION_ROUNDS ?? 6);
+  const llmRoundsPerDay = Number(process.env.LLM_DAILY_ROUNDS ?? 120);
 
   if (fakeQlooEnabled()) {
-    return { store, llmRoundsPerSession, agentDeps: { createMessage, findCandidates: fakeCandidates }, search: fakeSearch };
+    return { store, llmRoundsPerSession, llmRoundsPerDay, agentDeps: { createMessage, findCandidates: fakeCandidates }, search: fakeSearch };
   }
 
   const cachedGet = <T>(path: string, params: Record<string, string>, parse: (json: unknown) => T) =>
@@ -124,6 +130,7 @@ export function liveEnv(sessionId: string): TurnEnv {
   return {
     store,
     llmRoundsPerSession,
+    llmRoundsPerDay,
     agentDeps: {
       createMessage,
       findCandidates: ({ area, radiusM, signalIds, excludeIds }) => {
