@@ -70,3 +70,40 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Waiting on Qloo and the agent: pipeline checklist, one-line chip, card skeletons. */
+.wait-card { position: relative; overflow: hidden; display: grid; gap: var(--sp-8); padding: var(--sp-12); border: var(--bw-surface) solid var(--c-line); border-radius: var(--radius-md); background: var(--c-surface); }
+.wait-bar { position: absolute; inset: 0 0 auto 0; height: 4px; background: linear-gradient(90deg, transparent 0%, var(--c-accent) 40%, var(--c-accent) 60%, transparent 100%); background-size: 40% 100%; background-repeat: no-repeat; animation: wait-slide 1.4s var(--ease) infinite; }
+.wait-steps { display: grid; gap: var(--sp-8); margin: 0; padding: 0; list-style: none; font-size: var(--fs-md); }
+.wait-steps li { display: flex; align-items: center; gap: var(--sp-8); color: var(--c-ink-2); transition: color var(--dur-ui) var(--ease); }
+.wait-steps li[data-state="now"] { color: var(--c-ink); font-weight: var(--fw-bold, 700); animation: wait-in var(--dur-enter) var(--ease) both; }
+.wait-steps li[data-state="next"] { opacity: 0.55; }
+.wait-mark { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 700; border: 2px solid var(--c-line-strong); background: var(--c-surface); }
+.wait-steps li[data-state="done"] .wait-mark { background: var(--c-positive); border-color: var(--c-positive); color: var(--c-surface); }
+.wait-steps li[data-state="now"] .wait-mark { border-color: var(--c-accent); color: var(--c-accent-ink, var(--c-ink)); animation: wait-pulse 1.2s var(--ease) infinite; }
+.wait-time { margin: 0; justify-self: end; }
+.wait-dots { display: inline-flex; gap: 3px; align-items: flex-end; height: 10px; }
+.wait-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--c-accent); animation: wait-hop 0.9s var(--ease) infinite; }
+.wait-dots i:nth-child(2) { animation-delay: 0.15s; }
+.wait-dots i:nth-child(3) { animation-delay: 0.3s; }
+.wait-chip { display: inline-flex; align-items: center; gap: var(--sp-8); }
+.wait-chip__text { animation: wait-in var(--dur-enter) var(--ease) both; }
+.wait-ticks { display: inline-flex; gap: 3px; }
+.wait-ticks i { width: 10px; height: 4px; border-radius: 2px; background: var(--c-line); transition: background-color var(--dur-ui) var(--ease); }
+.wait-ticks i[data-on] { background: var(--c-accent); }
+.wait-skeletons { display: grid; gap: var(--sp-8); }
+.wait-skel { display: flex; gap: var(--sp-12); align-items: center; padding: var(--sp-12); border: var(--bw-surface) solid var(--c-line); border-radius: var(--radius-md); background: var(--c-surface); animation: wait-in var(--dur-enter) var(--ease) both; }
+.wait-skel__num { flex: none; width: 28px; height: 28px; border-radius: var(--radius-sm); }
+.wait-skel__lines { display: grid; flex: 1; gap: 8px; }
+.wait-skel__lines span { display: block; height: 10px; border-radius: var(--radius-pill); }
+.wait-skel__num, .wait-skel__lines span { background: linear-gradient(90deg, var(--c-line) 0%, var(--c-canvas) 50%, var(--c-line) 100%); background-size: 200% 100%; animation: wait-shimmer 1.3s linear infinite; }
+.ui-btn[data-pending] { cursor: progress; }
+@keyframes wait-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@keyframes wait-hop { 0%, 60%, 100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-5px); opacity: 1; } }
+@keyframes wait-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-accent) 45%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--c-accent) 0%, transparent); } }
+@keyframes wait-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes wait-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .wait-bar { animation: none; background: var(--c-accent); opacity: 0.6; }
+  .wait-dots i, .wait-skel__num, .wait-skel__lines span, .wait-steps li[data-state="now"] .wait-mark { animation: none; }
+}

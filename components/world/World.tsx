@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { buildScene } from "../../lib/world";
 import { buildGraph, polylinesFromSnapshot, type P, type TravelMode } from "../../lib/route";
 import type { Card, JourneyState, Verdict } from "../../lib/schema";
@@ -20,6 +20,8 @@ export type WorldProps = {
   onSelect: (id: string) => void;
   radiusM: number;
   loading: boolean;
+  /** What the loading chip says; plain "Asking Qloo…" when absent. */
+  loadingContent?: ReactNode;
   /** Tour focus: the camera steps to this tower. null/undefined = normal framing (or the finale tower). */
   focusId?: string | null;
   /** Café id to send the user's character to. A change to a new id starts the trip; null cancels one under way. */
@@ -46,6 +48,7 @@ export default function World({
   onSelect,
   radiusM,
   loading,
+  loadingContent,
   focusId = null,
   travelTo = null,
   travelMode = "auto",
@@ -159,7 +162,7 @@ export default function World({
             boxShadow: "var(--shadow-raised)",
           }}
         >
-          Asking Qloo…
+          {loadingContent ?? "Asking Qloo…"}
         </p>
       )}
       {geo && (

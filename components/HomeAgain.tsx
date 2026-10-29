@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EXAMPLE } from "@/lib/areas";
 import { createFixtureBackend } from "@/lib/autoplayFixture";
+import { CardSkeletons, WaitChip, WaitDots, WaitSteps, useElapsed } from "./Waiting";
 import type { JourneyBackend, TurnReply } from "@/lib/autoplay";
 import { startJourney, radiusForWeek } from "@/lib/journey";
 import type { Area, Card, JourneyState, Seed, Verdict } from "@/lib/schema";
@@ -129,6 +130,8 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   const [trace, setTrace] = useState<Trace | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // What the waiting UI names: the old café being matched and the radius being asked for.
+  const [wait, setWait] = useState<{ seed: string | null; radiusM: number }>({ seed: null, radiusM: 1000 });
   const [notice, setNotice] = useState<string | null>(null);
   const [widenOffer, setWidenOffer] = useState(false);
   const [wide, setWide] = useState(false);
@@ -170,6 +173,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
   async function turn(state: JourneyState, feedback: { id: string; verdict: Verdict }[], widen = false) {
     if (inflight.current) return;
     inflight.current = true;
+    setWait({ seed: state.seed.name, radiusM: widen ? 1500 : radiusForWeek(feedback.length ? (Math.min(3, state.week + 1) as 1 | 2 | 3) : state.week) });
     setBusy(true);
     setNotice(null);
     setError(null);
@@ -257,12 +261,21 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
 
   async function startExample() {
     resetJourney();
+    // Resolving the old café is the first wait too; turn() takes over the busy flag from here.
+    setWait({ seed: null, radiusM: 1000 });
+    setBusy(true);
     try {
       const body = await source.current.resolve(EXAMPLE.name, EXAMPLE.city);
       const seed = body.matches?.[0];
-      if (seed) start({ ...seed, city: EXAMPLE.city }, EXAMPLE.area);
-      else fail(body.notice ?? "Could not find the example café on Qloo.");
+      if (seed) {
+        setBusy(false);
+        start({ ...seed, city: EXAMPLE.city }, EXAMPLE.area);
+      } else {
+        setBusy(false);
+        fail(body.notice ?? "Could not find the example café on Qloo.");
+      }
     } catch {
+      setBusy(false);
       fail(CONNECTION_NOTICE);
     }
   }
@@ -287,6 +300,9 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     setSample(true);
     autoplay.start();
   }
+
+  const waitElapsed = useElapsed(busy, `${wait.seed ?? ''}:${wait.radiusM}`);
+  const waitProps = { seedName: wait.seed, radiusM: wait.radiusM, elapsed: waitElapsed };
 
   const radiusM = wide ? 1500 : journey ? radiusForWeek(journey.week) : 1000;
   const tourStep = autoplay.active ? autoplay.step : null;
@@ -335,8 +351,18 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
     journey &&
     cards.length > 0 && (
     <div className="ui-stack ui-stack--tight">
-      <button type="button" disabled={busy || feedback.length === 0} onClick={() => turn(journey, feedback)} className="ui-btn ui-btn--primary w-full">
-        {feedback.length === 0 ? "Mark a café to continue" : journey.week === 3 ? "Finish the third week" : `Go to week ${journey.week + 1}`}
+      <button type="button" disabled={busy || feedback.length === 0} data-pending={busy || undefined} onClick={() => turn(journey, feedback)} className="ui-btn ui-btn--primary w-full">
+        {busy ? (
+          <span className="inline-flex items-center gap-2">
+            Asking Qloo <WaitDots />
+          </span>
+        ) : feedback.length === 0 ? (
+          "Mark a café to continue"
+        ) : journey.week === 3 ? (
+          "Finish the third week"
+        ) : (
+          `Go to week ${journey.week + 1}`
+        )}
       </button>
       <p className={hint ? "ui-meta ui-num [@media(max-height:820px)]:hidden" : "ui-meta ui-num hidden sm:block"} role="status">
         {feedback.length} of {cards.length} marked · love the same café twice and it becomes your regular.
@@ -381,6 +407,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
           onSelect={select}
           radiusM={showStart ? 1000 : radiusM}
           loading={busy}
+          loadingContent={<WaitChip {...waitProps} />}
           focusId={focusId}
           travelTo={travel.to}
           travelMode={travel.mode}
@@ -421,6 +448,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                       Try your own café
                     </button>
                   </div>
+                  {busy && !journey && <WaitSteps {...waitProps} />}
                   <ol data-tour="intro" className="grid grid-cols-3 gap-2" aria-label="How it works">
                     {EXPLAIN.map((e) => (
                       <li key={e.n} className="ui-callout min-w-0" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
@@ -440,6 +468,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                       </li>
                     ))}
                   </ol>
+                  {!(busy && !journey) && (
                   <div className="[@media(max-height:760px)]:hidden" aria-label="Example result">
                     <div className="ui-callout" style={{ padding: "var(--sp-8) var(--sp-12)" }}>
                       <p className="ui-label">What you get, for example</p>
@@ -453,13 +482,10 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                       </div>
                     </div>
                   </div>
+                  )}
                 </>
               )}
-              {busy && !journey && (
-                <p className="ui-status ui-status--info" role="status">
-                  Asking Qloo for cafés near {EXAMPLE.area.name}…
-                </p>
-              )}
+              {busy && !journey && formOpen && <WaitSteps {...waitProps} />}
               {notice && !journey && (
                 <p role="status" className="ui-callout ui-callout--warning ui-small">
                   {notice}
@@ -499,6 +525,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                 week={stage.week}
                 radiusM={radiusM}
                 loading={busy}
+                loadingContent={<WaitSteps {...waitProps} />}
                 open={panels.qlooOpen}
                 onToggle={() => setUserPanels((p) => ({ ...p, qlooOpen: !p.qlooOpen }))}
               />
@@ -533,9 +560,13 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                   </span>
                 </header>
                 <ul className="ui-stack ui-stack--tight min-h-0 flex-1 overflow-y-auto" style={{ "--stack-gap": "var(--sp-4)" } as CSSProperties}>
-                  {cards.map((c, i) => (
-                    <li key={c.entityId}>{cardFor(c, i)}</li>
-                  ))}
+                  {busy ? (
+                    <li>
+                      <CardSkeletons count={cards.length} />
+                    </li>
+                  ) : (
+                    cards.map((c, i) => <li key={c.entityId}>{cardFor(c, i)}</li>)
+                  )}
                 </ul>
                 <div className="pt-3">{submitRow(true)}</div>
               </section>
@@ -569,7 +600,7 @@ export function HomeAgain({ backend = liveBackend }: { backend?: JourneyBackend 
                 >
                   <span aria-hidden="true" className="mx-auto mt-1 block h-1.5 w-12" style={{ background: "var(--c-line-strong)", borderRadius: "var(--radius-pill)" }} />
                   <span className="ui-small flex items-center justify-between gap-3 px-1">
-                    <span className="min-w-0 flex-1 truncate font-bold">{sheetSummary}</span>
+                    <span className="min-w-0 flex-1 truncate font-bold">{busy ? <WaitChip {...waitProps} /> : sheetSummary}</span>
                     <span className="ui-coord ui-num shrink-0">{panels.sheetOpen ? "hide" : "details"}</span>
                   </span>
                 </button>

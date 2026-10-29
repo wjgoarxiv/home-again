@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { Card } from "@/lib/schema";
 import { panelSummary } from "@/lib/panelSummary";
 
@@ -33,6 +33,7 @@ export function QlooPanel({
   week,
   radiusM,
   loading,
+  loadingContent,
   open,
   onToggle,
 }: {
@@ -42,6 +43,8 @@ export function QlooPanel({
   week: number;
   radiusM: number;
   loading: boolean;
+  /** Shown in the open panel while Qloo is being asked; a plain line when absent. */
+  loadingContent?: ReactNode;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -64,11 +67,12 @@ export function QlooPanel({
 
       {open && (
         <div id="qloo-body" className="ui-stack min-h-0 overflow-y-auto">
-          {loading && (
-            <p className="ui-small" role="status">
-              Looking for cafés near {areaName}…
-            </p>
-          )}
+          {loading &&
+            (loadingContent ?? (
+              <p className="ui-small" role="status">
+                Looking for cafés near {areaName}…
+              </p>
+            ))}
 
           {trace && !loading && (
             <dl className="ui-small grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2">
