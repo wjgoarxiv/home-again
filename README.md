@@ -25,7 +25,7 @@ Built for the Qloo Agentic Hackathon 2026.
 
 <p align="center"><img src="docs/screen-world.png" alt="The end of the 1-minute demo on the live site: the East Village drawn from NYC Open Data, the loved café standing as a coral tower, the Qloo panel showing week 2's taste signal and exclusions, and the your-new-regular card with its shared Qloo taste tags" width="830"></p>
 
-**Short on time?** Open the [live demo](https://home-again-gamma.vercel.app) and press **▶ Watch a 1-minute demo**. It runs a whole three-week journey on real Qloo data in under a minute: the camera moves to each step, a caption explains it, and you can pause, skip or mute.
+**Short on time?** Open the [live demo](https://home-again-gamma.vercel.app) and press **▶ Watch a 1-minute demo**. It runs a whole three-week journey on real Qloo data in under a minute: the camera moves to each step, a caption explains it, and you can pause, skip or mute. Or watch the [narrated 1:30 demo video](https://home-again-gamma.vercel.app/demo.mp4).
 
 ## ☕ How it works
 

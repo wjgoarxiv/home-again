@@ -1,6 +1,7 @@
 # Devpost description (draft)
 
 - Hosted demo: https://home-again-gamma.vercel.app
+- Demo video (1:30): https://home-again-gamma.vercel.app/demo.mp4
 - Repository: https://github.com/wjgoarxiv/home-again
 - License: MIT
 
@@ -29,7 +30,8 @@ Three things make the recommendations checkable. First, every reason on a card i
 - A Claude Haiku agent (`claude-haiku-5-5`) calls `find_candidates`, then `submit_cards`; code validates every card before display.
 - Qloo answers cache for 24 hours; calls cap at 8 per session and 300 per day; each session gets 6 model rounds before the deterministic fallback.
 - The map is three.js over stored NYC Open Data snapshots (`public/geo`, built by `scripts/fetch-geo.mjs`), with a flat top-down fallback for missing WebGL or reduced motion. The interface follows a locked friendly-pastel kit.
-- 397 Vitest tests cover journey rules, the validator, street routing and the guided demo.
+- 404 Vitest tests cover journey rules, the validator, street routing and the guided demo.
+- If Qloo is unreachable during the guided demo, it offers to finish on clearly labelled sample data instead of stopping.
 
 ## Challenges
 
